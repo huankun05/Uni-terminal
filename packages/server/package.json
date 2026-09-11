@@ -1,0 +1,27 @@
+{
+  "name": "@uni-terminal/server",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "node --experimental-sqlite --disable-warning=ExperimentalWarning --watch src/index.ts",
+    "start": "node --experimental-sqlite --disable-warning=ExperimentalWarning src/index.ts",
+    "test": "node test/smoke.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.7",
+    "node-pty": "^1.1.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/qrcode": "^1.5.5",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.8.3"
+  }
+}

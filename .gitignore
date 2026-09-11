@@ -1,0 +1,23 @@
+node_modules/
+dist/
+build/
+*.log
+
+# runtime state: never commit credentials, keys or the database
+.data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+uni-terminal.json
+
+# scratch
+_smoke/
+_demo-*/
+_*.txt
+_*.log
+_*.md.bak
+
+# local tool state
+.workbuddy/

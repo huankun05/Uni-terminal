@@ -1,0 +1,36 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8787,
+    "name": "我的工作站"
+  },
+  "transport": {
+    "mode": "lan"
+  },
+  "agents": {
+    "claude": {
+      "enabled": true,
+      "mode": "pty"
+    },
+    "codex": {
+      "enabled": false,
+      "mode": "pty"
+    }
+  },
+  "workspaces": [
+    {
+      "id": "default",
+      "name": "默认工作区",
+      "path": "F:\\Work\\Create"
+    }
+  ],
+  "security": {
+    "pairingTtlMs": 300000,
+    "pairingRotateMs": 30000,
+    "deviceTtlMs": 15552000000,
+    "maxPendingPairingsGlobal": 100,
+    "maxPendingPairingsPerIp": 3,
+    "maxPairingAttempts": 3,
+    "cookieName": "ut_device"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "uni-terminal",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Scan-to-use, self-hosted web console that drives multiple AI coding agents through one interface.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "dev": "node --experimental-sqlite --disable-warning=ExperimentalWarning --watch packages/server/src/index.ts",
+    "start": "node --experimental-sqlite --disable-warning=ExperimentalWarning packages/server/src/index.ts",
+    "test": "npm run test -w @uni-terminal/server",
+    "web:dev": "npm run dev -w @uni-terminal/web",
+    "web:build": "npm run build -w @uni-terminal/web",
+    "typecheck": "tsc -p packages/server/tsconfig.json"
+  }
+}

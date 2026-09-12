@@ -58,24 +58,22 @@ export function generateUserCode(length = 8): string {
 }
 
 /**
- * Device fingerprint used to bind a pairing request to the client that started
- * it. Without this, an attacker who photographs the QR code could register
- * their own public key first and receive the credential the user believes they
- * are granting to their own phone.
+ * Device fingerprint: a stable per-device identifier for humans to compare.
  *
- * Deliberately coarse on IP (it may change as the phone roams) but strict on
- * the client nonce, which the phone keeps in memory for the pairing's lifetime.
+ * Same phone + same network → same fingerprint, so a re-pairing resolves to
+ * the same device entry instead of an ever-growing list of identical ones.
+ * The anti-QR-theft binding does NOT live here — it is the single-use
+ * challenge, enforced at claim time regardless of this value.
+ *
+ * Deliberately coarse on IP (a /24 or /48 prefix) so DHCP changes and roams
+ * don't churn the identity.
  */
-export function deviceFingerprint(params: {
-  ua: string;
-  ip: string;
-  clientNonce: string;
-}): string {
-  return sha256(`${params.ua}\u0000${ipFamily(params.ip)}\u0000${params.clientNonce}`);
+export function deviceFingerprint(params: { ua: string; ip: string }): string {
+  return sha256(`${params.ua}\u0000${ipPrefix(params.ip)}`);
 }
 
 /** Collapses an address to its /24 (v4) or /48 (v6) prefix. */
-function ipFamily(ip: string): string {
+function ipPrefix(ip: string): string {
   if (ip.includes(':')) {
     return ip.split(':').slice(0, 3).join(':');
   }

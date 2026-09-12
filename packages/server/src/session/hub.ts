@@ -1,3 +1,5 @@
+import { existsSync, statSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
 import type { SessionRow, Store } from '../db.ts';
 import type { AgentSetting, UniConfig } from '../config.ts';
 import { lookupAgent } from '../agents/catalog.ts';
@@ -48,6 +50,9 @@ interface Runtime {
 export interface StartParams {
   agent: string;
   workspaceId?: string;
+  /** Explicit working directory (picked in the phone's dir browser). Wins
+   *  over workspaceId; validated before a process is spawned. */
+  cwd?: string;
   title?: string;
   cols?: number;
   rows?: number;
@@ -144,11 +149,22 @@ export class SessionHub {
     const id = randomId(12);
     const now = Date.now();
 
+    // An explicitly picked directory wins over the configured workspace. It
+    // must exist and be a directory — reject before spawning anything.
+    let cwd = launch.cwd;
+    if (params.cwd) {
+      const picked = resolve(params.cwd);
+      if (!isAbsolute(picked) || !existsSync(picked) || !statSync(picked).isDirectory()) {
+        throw new SessionError('bad_cwd', '目录不存在或不可用');
+      }
+      cwd = picked;
+    }
+
     const session: SessionRow = {
       id,
       agent: params.agent,
-      workspace: params.workspaceId ?? this.config.workspaces[0]?.id ?? null,
-      cwd: launch.cwd,
+      workspace: params.cwd ? null : (params.workspaceId ?? this.config.workspaces[0]?.id ?? null),
+      cwd,
       title: params.title ?? `${params.agent} · ${new Date(now).toLocaleTimeString('zh-CN')}`,
       status: 'starting',
       created_at: now,
@@ -161,7 +177,7 @@ export class SessionHub {
       handle = await startProcess({
         command: launch.command,
         args: launch.args,
-        cwd: launch.cwd,
+        cwd,
         cols: params.cols ?? 100,
         rows: params.rows ?? 30,
       });

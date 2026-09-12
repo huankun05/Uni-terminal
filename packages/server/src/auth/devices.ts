@@ -45,6 +45,13 @@ export class DeviceService {
     this.config = config;
   }
 
+  /**
+   * Issues a credential, upserting on fingerprint: the same physical device
+   * re-pairing (cookie lost, browser data cleared) keeps its identity, name
+   * and history — the old credential is rotated out, not multiplied. A
+   * revoked fingerprint is treated as new: coming back requires an explicit
+   * human approval anyway, and it gets a clean slate.
+   */
   issue(params: {
     name: string;
     ua: string;
@@ -54,6 +61,26 @@ export class DeviceService {
   }): IssuedDevice {
     const now = Date.now();
     const token = randomToken(32);
+    const tokenHash = sha256(token);
+    const expiresAt = now + this.config.security.deviceTtlMs;
+
+    const existing = this.store.findLiveDeviceByFingerprint(params.fingerprint);
+    if (existing) {
+      this.store.updateDeviceCredential(existing.id, {
+        tokenHash,
+        ua: params.ua,
+        ip: params.ip,
+        publicKey: params.publicKey,
+        lastSeenAt: now,
+        expiresAt,
+      });
+      log.info('已有设备重新配对，凭据已轮换', { id: existing.id, name: existing.name });
+      return {
+        device: { ...existing, token_hash: tokenHash, last_seen_at: now, expires_at: expiresAt },
+        token,
+      };
+    }
+
     const device: DeviceRow = {
       id: randomId(12),
       name: params.name || '未命名设备',
@@ -61,10 +88,10 @@ export class DeviceService {
       first_ip: params.ip,
       public_key: params.publicKey,
       fingerprint: params.fingerprint,
-      token_hash: sha256(token),
+      token_hash: tokenHash,
       created_at: now,
       last_seen_at: now,
-      expires_at: now + this.config.security.deviceTtlMs,
+      expires_at: expiresAt,
       revoked_at: null,
     };
     this.store.insertDevice(device);

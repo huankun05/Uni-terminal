@@ -23,17 +23,20 @@ interface FsListing {
 export function DirPicker(props: {
   title: string;
   initialPath?: string;
+  /** '/api/local/fs/list' (loopback admin) or '/api/fs/list' (paired device). */
+  endpoint?: string;
   onPick: (path: string) => void;
   onClose: () => void;
 }): React.ReactNode {
   const [listing, setListing] = useState<FsListing | null>(null);
   const [filter, setFilter] = useState('');
   const [error, setError] = useState('');
+  const endpoint = props.endpoint ?? '/api/local/fs/list';
 
   const browse = (path: string): void => {
     setError('');
     void api
-      .post<FsListing>('/api/local/fs/list', { path })
+      .post<FsListing>(endpoint, { path })
       .then(setListing)
       .catch((err: Error) => setError(err.message));
   };

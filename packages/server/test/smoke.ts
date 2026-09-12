@@ -190,6 +190,7 @@ async function main(): Promise<void> {
     await testPollCadence();
     await testRateLimitsAndReplay();
     await testRevocation(deviceCookie);
+    await testSameDeviceRepairs(deviceCookie);
     await testErrorHygiene();
     await testConfigSurface();
     await testDegradedStartupAndPortFallback();
@@ -598,7 +599,13 @@ async function testRevocation(cookie: string): Promise<void> {
   const claim = await (
     await fetch(`${BASE}/api/pair/${created.id}/claim`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        // Distinct UA → distinct fingerprint → a genuinely separate device.
+        // (Same-UA claims upsert into the same device row; see
+        // testSameDeviceRepairs.)
+        'user-agent': 'smoke-tablet/1.0',
+      },
       body: JSON.stringify({
         challenge: created.challenge,
         publicKey: publicKeyB64(),
@@ -654,6 +661,67 @@ async function testRevocation(cookie: string): Promise<void> {
 
   const stillValid = await fetch(`${BASE}/api/me`, { headers: { cookie } });
   check('其他设备不受影响', stillValid.ok);
+}
+
+/**
+ * Re-pairing the same device (same UA + same IP prefix → same fingerprint)
+ * must resolve to the SAME device row with a rotated credential, not grow a
+ * duplicate entry — and the old credential must stop working immediately.
+ */
+async function testSameDeviceRepairs(firstCookie: string): Promise<void> {
+  section('同设备重新配对（指纹 upsert）');
+
+  const before = (await (await fetch(`${BASE}/api/local/devices`)).json()) as { devices: Array<{ id: string }> };
+  const countBefore = before.devices.length;
+
+  // Capture the first device's identity BEFORE the upsert — afterwards its
+  // old credential is rotated out, which is exactly the behaviour under test.
+  const firstId = ((await (await fetch(`${BASE}/api/me`, { headers: { cookie: firstCookie } })).json()) as { device?: { id?: string } }).device?.id;
+  check('前置：第一台设备凭据有效', Boolean(firstId));
+
+  const created = await (await fetch(`${BASE}/api/local/pairings`, { method: 'POST' })).json() as {
+    id: string;
+    challenge: string;
+  };
+  // No explicit UA header → same 'unknown' UA as the first device's claim,
+  // same loopback /24 → same fingerprint by construction.
+  const claim = await (
+    await fetch(`${BASE}/api/pair/${created.id}/claim`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        challenge: created.challenge,
+        publicKey: publicKeyB64(),
+        clientNonce: 'repair-case',
+      }),
+    })
+  ).json() as { pollToken: string };
+
+  const approve = await fetch(`${BASE}/api/local/pairings/${created.id}/approve`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '改名未遂（应保留原名）' }),
+  });
+  check('重新配对批准成功', approve.ok);
+
+  await sleep(5_200);
+  const collect = await fetch(`${BASE}/api/pair/${created.id}/status`, {
+    headers: { 'x-poll-token': claim.pollToken },
+  });
+  const cookie2 = extractCookie(collect);
+  const body = (await collect.json()) as { deviceId?: string; device?: { id?: string; name?: string } };
+  check('重新配对拿到新凭据', Boolean(cookie2));
+
+  check('指纹相同 → 归入同一台设备', Boolean(firstId) && body.deviceId === firstId, `new=${body.deviceId} first=${firstId}`);
+
+  const after = (await (await fetch(`${BASE}/api/local/devices`)).json()) as { devices: Array<{ id: string }> };
+  check('设备列表不增长', after.devices.length === countBefore, `${countBefore} -> ${after.devices.length}`);
+
+  const me2 = await fetch(`${BASE}/api/me`, { headers: { cookie: cookie2 ?? '' } });
+  check('新凭据有效', me2.ok);
+
+  const me1 = await fetch(`${BASE}/api/me`, { headers: { cookie: firstCookie } });
+  check('旧凭据已被轮换失效', me1.status === 401, `got ${me1.status}`);
 }
 
 async function testErrorHygiene(): Promise<void> {

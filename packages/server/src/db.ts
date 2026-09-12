@@ -196,6 +196,27 @@ export class Store {
       | undefined;
   }
 
+  /** Live (non-revoked) device with this fingerprint, for re-pairing upserts. */
+  findLiveDeviceByFingerprint(fingerprint: string): DeviceRow | undefined {
+    return this.db
+      .prepare('SELECT * FROM devices WHERE fingerprint = ? AND revoked_at IS NULL ORDER BY created_at DESC')
+      .get(fingerprint) as DeviceRow | undefined;
+  }
+
+  /** Re-pairing: rotate the credential in place, keep the device identity. */
+  updateDeviceCredential(
+    id: string,
+    fields: { tokenHash: string; ua: string; ip: string; publicKey: string | null; lastSeenAt: number; expiresAt: number },
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE devices
+           SET token_hash = ?, ua = ?, first_ip = ?, public_key = ?, last_seen_at = ?, expires_at = ?
+         WHERE id = ?`,
+      )
+      .run(fields.tokenHash, fields.ua, fields.ip, fields.publicKey, fields.lastSeenAt, fields.expiresAt, id);
+  }
+
   listDevices(): DeviceRow[] {
     return this.db
       .prepare('SELECT * FROM devices ORDER BY created_at DESC')

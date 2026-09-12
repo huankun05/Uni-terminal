@@ -316,6 +316,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         agent?: unknown;
         title?: unknown;
         workspaceId?: unknown;
+        cwd?: unknown;
         cols?: unknown;
         rows?: unknown;
       };
@@ -325,6 +326,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         agent,
         title: optionalString(body.title, MAX_TITLE_LENGTH),
         workspaceId: optionalString(body.workspaceId, 64),
+        cwd: optionalString(body.cwd, 500),
         cols: optionalNumber(body.cols, 20, 500),
         rows: optionalNumber(body.rows, 5, 200),
       });
@@ -721,43 +723,28 @@ export function createApp(deps: AppDeps): Hono<Env> {
       const requested = typeof body.path === 'string' && body.path.trim().length > 0
         ? body.path.trim()
         : homedir();
-      const target = resolve(requested);
+      return c.json(listDirectory(requested));
+    } catch (err) {
+      return handleError(c, err);
+    }
+  });
 
-      if (!existsSync(target) || !statSync(target).isDirectory()) {
-        throw new SessionError('bad_request', '路径不存在或不是目录');
-      }
-
-      const entries: Array<{ name: string; type: 'dir' | 'file'; size?: number }> = [];
-      let raw: import('node:fs').Dirent[];
-      try {
-        raw = readdirSync(target, { withFileTypes: true });
-      } catch {
-        throw new SessionError('bad_request', '目录不可读');
-      }
-      for (const item of raw) {
-        if (item.name.startsWith('$')) continue;
-        if (item.isDirectory()) {
-          entries.push({ name: item.name, type: 'dir' });
-        } else if (item.isFile()) {
-          let size: number | undefined;
-          try {
-            size = statSync(join(target, item.name)).size;
-          } catch {
-            // Size is informational only.
-          }
-          entries.push({ name: item.name, type: 'file', size });
-        }
-      }
-      entries.sort((a, b) =>
-        a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1,
-      );
-
-      const parent = dirname(target);
-      return c.json({
-        path: target,
-        parent: parent === target ? null : parent,
-        entries,
-      });
+  /**
+   * Directory listing for *paired devices* — the phone's new-task dir picker.
+   *
+   * This hands a credential holder a read-only view of the filesystem, which
+   * is a real capability. It stays: a paired device can already launch an
+   * arbitrary agent in any directory, which is strictly more powerful than
+   * listing one, and revocation remains the control. If multi-trust-levels
+   * ever arrive, this is the first endpoint to gate.
+   */
+  app.post('/api/fs/list', requireDevice, async (c) => {
+    try {
+      const body = (await readJson(c)) as { path?: unknown };
+      const requested = typeof body.path === 'string' && body.path.trim().length > 0
+        ? body.path.trim()
+        : homedir();
+      return c.json(listDirectory(requested));
     } catch (err) {
       return handleError(c, err);
     }
@@ -949,6 +936,46 @@ function serveWebAsset(distDir: string, requestPath: string): Response {
 }
 
 // -------------------------------------------------------------------- misc
+
+/** One level of directory listing, shared by the loopback and device endpoints. */
+function listDirectory(requested: string): {
+  path: string;
+  parent: string | null;
+  entries: Array<{ name: string; type: 'dir' | 'file'; size?: number }>;
+} {
+  const target = resolve(requested);
+  if (!existsSync(target) || !statSync(target).isDirectory()) {
+    throw new SessionError('bad_request', '路径不存在或不是目录');
+  }
+
+  const entries: Array<{ name: string; type: 'dir' | 'file'; size?: number }> = [];
+  let raw: import('node:fs').Dirent[];
+  try {
+    raw = readdirSync(target, { withFileTypes: true });
+  } catch {
+    throw new SessionError('bad_request', '目录不可读');
+  }
+  for (const item of raw) {
+    if (item.name.startsWith('$')) continue;
+    if (item.isDirectory()) {
+      entries.push({ name: item.name, type: 'dir' });
+    } else if (item.isFile()) {
+      let size: number | undefined;
+      try {
+        size = statSync(join(target, item.name)).size;
+      } catch {
+        // Size is informational only.
+      }
+      entries.push({ name: item.name, type: 'file', size });
+    }
+  }
+  entries.sort((a, b) =>
+    a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1,
+  );
+
+  const parent = dirname(target);
+  return { path: target, parent: parent === target ? null : parent, entries };
+}
 
 /** Per-section merge of an API patch onto the on-disk config document. */
 function mergeSections(

@@ -234,11 +234,7 @@ export class PairingService {
     }
 
     const pollToken = randomToken(32);
-    const fingerprint = deviceFingerprint({
-      ua: params.ua,
-      ip: params.ip,
-      clientNonce: params.clientNonce,
-    });
+    const fingerprint = deviceFingerprint({ ua: params.ua, ip: params.ip });
 
     const ok = this.store.claimPairing(id, {
       challenge: params.challenge,

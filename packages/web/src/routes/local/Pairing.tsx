@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { api } from '../../api/client.ts';
+import { api, ApiError } from '../../api/client.ts';
 
 /**
  * 配对台（M2 核心）。
@@ -81,25 +81,32 @@ export function LocalPairing(): React.ReactNode {
     })();
   }, [createPairing, loadQr]);
 
+  const rotate = useCallback(async (id: string): Promise<void> => {
+    if (rotating.current) return;
+    rotating.current = true;
+    try {
+      await api.post(`/api/local/pairings/${id}/rotate`);
+      setMessage('');
+      setRotation((n) => n + 1);
+      loadQr(id);
+    } catch (err) {
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+        // 旧码已被消费/作废（比如刚批准了一台设备）——直接换一张新码。
+        await createPairing();
+      } else {
+        setMessage('轮换失败，正在重试');
+      }
+    } finally {
+      rotating.current = false;
+    }
+  }, [createPairing, loadQr]);
+
   // 30 秒轮换：旧 challenge 立即作废，换上的才是有效的。
   useEffect(() => {
     if (!pairing) return;
-    const timer = setInterval(() => {
-      if (rotating.current) return;
-      rotating.current = true;
-      void api
-        .post<{ challenge: string }>(`/api/local/pairings/${pairing.id}/rotate`)
-        .then(() => {
-          setRotation((n) => n + 1);
-          loadQr(pairing.id);
-        })
-        .catch(() => setMessage('轮换失败，正在重试'))
-        .finally(() => {
-          rotating.current = false;
-        });
-    }, rotateMs);
+    const timer = setInterval(() => void rotate(pairing.id), rotateMs);
     return () => clearInterval(timer);
-  }, [pairing, rotateMs, loadQr]);
+  }, [pairing, rotateMs, rotate]);
 
   // 待批准请求轮询：claimed 的才会出现在批准卡片里。
   useEffect(() => {
@@ -136,10 +143,12 @@ export function LocalPairing(): React.ReactNode {
             {qrUrl && (
               <img
                 src={qrUrl}
-                alt="配对二维码"
+                alt="配对二维码（点按立即刷新）"
+                title="点按立即刷新"
                 width={180}
                 height={180}
-                style={{ borderRadius: 'var(--radius-sm)' }}
+                onClick={() => pairing && void rotate(pairing.id)}
+                style={{ borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
               />
             )}
             <CountdownRing rotateMs={rotateMs} rotation={rotation} size={188} />

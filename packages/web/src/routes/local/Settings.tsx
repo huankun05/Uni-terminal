@@ -57,6 +57,8 @@ export function LocalSettings(): React.ReactNode {
   const [tsStatus, setTsStatus] = useState<TransportInfo | null>(null);
   const [tsDetail, setTsDetail] = useState('');
   const [tsBusy, setTsBusy] = useState(false);
+  const [tsFeedback, setTsFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [cfFeedback, setCfFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const [tunnelBusy, setTunnelBusy] = useState(false);
   const [customBinary, setCustomBinary] = useState('');
 
@@ -86,10 +88,14 @@ export function LocalSettings(): React.ReactNode {
     try {
       const res = await api.post<{ tailscale: TransportInfo }>('/api/local/transport/tailscale', { action });
       setTsStatus(res.tailscale);
-      if (action === 'serve') setMessage('Tailscale HTTPS 已启用，二维码指向 ts.net 固定地址');
-      if (action === 'off') setMessage('Tailscale 发布已关闭，回到局域网模式');
+      setTsFeedback({
+        ok: true,
+        text: action === 'serve' ? '✅ 启用成功！下方即固定地址，手机用它访问（二维码也已指向它）'
+          : action === 'off' ? '✅ 已关闭发布，回到局域网模式'
+            : '✅ 状态已刷新',
+      });
     } catch (err) {
-      setTsDetail(err instanceof Error ? err.message : String(err));
+      setTsFeedback({ ok: false, text: err instanceof Error ? err.message : String(err) });
     } finally {
       setTsBusy(false);
       refreshTunnel();
@@ -100,13 +106,14 @@ export function LocalSettings(): React.ReactNode {
     setTunnelBusy(true);
     try {
       await api.post('/api/local/transport/cloudflare', { action, binaryPath });
-      setMessage(
-        action === 'start' ? '隧道已建立，二维码现在指向 HTTPS 外网地址'
-          : action === 'stop' ? '隧道已停止，回到局域网模式'
-            : 'cloudflared 下载完成，可以启动隧道了',
-      );
+      setCfFeedback({
+        ok: true,
+        text: action === 'start' ? '✅ 隧道已建立！下方 HTTPS 地址即可从外网访问，二维码已指向它'
+          : action === 'stop' ? '✅ 隧道已停止，回到局域网模式'
+            : '✅ cloudflared 下载完成，点「启动快速隧道」继续',
+      });
     } catch (err) {
-      setMessage(`操作失败：${err instanceof Error ? err.message : String(err)}`);
+      setCfFeedback({ ok: false, text: err instanceof Error ? err.message : String(err) });
     } finally {
       setTunnelBusy(false);
       refreshTunnel();
@@ -293,6 +300,11 @@ export function LocalSettings(): React.ReactNode {
 
       <h2>组网访问（Tailscale · HTTPS · 固定地址）</h2>
       <div className="card" style={{ fontSize: 14 }}>
+        {tsFeedback && (
+          <p style={{ margin: '0 0 10px', fontSize: 13.5, color: tsFeedback.ok ? 'var(--state-done)' : 'var(--state-waiting)' }}>
+            {tsFeedback.text}
+          </p>
+        )}
         {tsStatus?.ready ? (
           <>
             <p style={{ margin: '0 0 6px' }}>
@@ -336,6 +348,11 @@ export function LocalSettings(): React.ReactNode {
 
       <h2>外网访问（HTTPS）</h2>
       <div className="card" style={{ fontSize: 14 }}>
+        {cfFeedback && (
+          <p style={{ margin: '0 0 10px', fontSize: 13.5, color: cfFeedback.ok ? 'var(--state-done)' : 'var(--state-waiting)' }}>
+            {cfFeedback.text}
+          </p>
+        )}
         {tunnel?.ready ? (
           <>
             <p style={{ margin: '0 0 6px' }}>

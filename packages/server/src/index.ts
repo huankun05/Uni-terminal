@@ -95,6 +95,14 @@ async function main(): Promise<void> {
     });
   }
 
+  // tailscale：刷新状态缓存；若 serve 因 tailscaled 更新/重登而丢失，
+  // 自动补启——用户点过一次「启用」就应永久生效，而不是每次重启再点。
+  if (config.transport.mode === 'tailscale') {
+    void transport.tailscale.ensureReady().catch((err: Error) => {
+      log.warn('tailscale 自愈失败', { reason: err.message });
+    });
+  }
+
   // Probe node-pty once at boot so the startup banner can state plainly
   // whether interactive terminals will work, instead of failing later.
   await loadPty();

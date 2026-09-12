@@ -156,6 +156,26 @@ export class TailscaleTransport implements TransportAdapter {
     return this.cached;
   }
 
+  /**
+   * 开机自愈：已登录且有 MagicDNS 名、但 serve 未在位时自动补启。
+   *
+   * serve 配置理论上持久化在 tailscaled 里，但实际会因客户端更新/重登等
+   * 情况丢失——用户在界面上点过一次「启用」，就应当永远生效，而不是每次
+   * 重启都要重新点。幂等，安全。
+   */
+  async ensureReady(): Promise<TransportStatus> {
+    const status = await this.detect();
+    if (status.ready) return status;
+    if (this.dnsName) {
+      try {
+        return await this.enableServe();
+      } catch (err) {
+        log.warn('开机自愈补启 serve 失败', { reason: (err as Error).message });
+      }
+    }
+    return this.cached ?? status;
+  }
+
   /** 代跑 `tailscale serve --bg`，把本服务发布为 ts.net HTTPS。 */
   async enableServe(): Promise<TransportStatus> {
     const bin = this.binary();

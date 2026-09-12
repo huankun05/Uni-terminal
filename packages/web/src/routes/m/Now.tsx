@@ -4,7 +4,9 @@ import { NavLink, Outlet, useNavigate } from 'react-router';
 import { api } from '../../api/client.ts';
 import { useLive } from '../../store/live.ts';
 import { formatTime } from '../../lib/format.ts';
+import { stripAnsi } from '../../lib/ansi.ts';
 import { sessionSummary } from './Session.tsx';
+import { analyzeTail } from '../../lib/pty.ts';
 
 /**
  * 三段式底部导航（实施01 §3.2）：现在 / 新建 / 设置。
@@ -106,16 +108,21 @@ export function MNow(): React.ReactNode {
       ) : (
         active.map((s) => {
           const summary = sessionSummary(events[s.id] ?? []);
+          const raw = (events[s.id] ?? [])
+            .filter((e) => e.type === 'session.output')
+            .map((e) => (e.payload as { chunk?: string })?.chunk ?? '')
+            .join('');
+          const needsReply = analyzeTail(stripAnsi(raw).slice(-3000)).kind !== 'none';
           return (
             <div
               key={s.id}
               className="card"
               onClick={() => void navigate(`/m/s/${s.id}`)}
-              style={{ cursor: 'pointer', marginBottom: 10, borderColor: 'var(--state-running)' }}
+              style={{ cursor: 'pointer', marginBottom: 10, borderColor: needsReply ? 'var(--state-waiting)' : 'var(--state-running)' }}
             >
               <div>
-                <span className="status-dot" style={{ background: 'var(--state-running)' }} />
-                <strong>{s.agent}</strong> 正在运行
+                <span className="status-dot" style={{ background: needsReply ? 'var(--state-waiting)' : 'var(--state-running)' }} />
+                <strong>{s.agent}</strong> {needsReply ? '正在等你应答' : '正在运行'}
                 {s.title && <span className="muted" style={{ fontSize: 13 }}> · {s.title}</span>}
               </div>
               {summary && (

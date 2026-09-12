@@ -3,15 +3,18 @@ import { Link, useLocation, useParams } from 'react-router';
 
 import { useLive, type LiveEvent } from '../../store/live.ts';
 import { stripAnsi } from '../../lib/ansi.ts';
+import { analyzeTail } from '../../lib/pty.ts';
 import { TerminalPane } from '../../components/TerminalPane.tsx';
 import { QuickReplies } from '../../components/QuickReplies.tsx';
 
 /**
  * 会话详情（实施01 §3.4/§3.6，视图按 E3 定案）：
  *  - 「终端」默认视图：xterm 渲染的 TUI，颜色与排版忠实，可键盘交互；
- *  - 「文本」视图：ANSI 剥离的纯文本流，用于通读与复制；
- *  - 快捷应答：Agent 抛 y/n 时点一下就走；按键面板给 TUI 兜底；
- *  - 新建任务带来的 prompt 在会话就绪后自动送入。
+ *  - 「文本」视图：ANSI 剥离的完整历史，可滚动通读（终端视图受 TUI
+ *    备用缓冲区限制没有回滚，这里就是完整历史记录）；
+ *  - PTY 智能应答：识别 Claude Code 的选择菜单 / y/n 确认 → 转成按钮；
+ *    读取当前权限模式 → 一键切换（shift+tab）；
+ *  - 快捷应答兜底 + 新建任务 prompt 自动送入。
  */
 
 export function MSession(): React.ReactNode {
@@ -34,11 +37,13 @@ export function MSession(): React.ReactNode {
 
   const list: LiveEvent[] = events[id] ?? [];
 
-  // 文本视图的输出缓存（终端视图自己消化事件）。
   const outputText = useMemo(
     () => list.filter((e) => e.type === 'session.output').map((e) => (e.payload as { chunk?: string })?.chunk ?? '').join(''),
     [list],
   );
+
+  // PTY 智能应答：从输出尾部识别选择菜单 / y/n 确认 / 当前权限模式。
+  const intent = useMemo(() => analyzeTail(stripAnsi(outputText).slice(-3000)), [outputText]);
 
   // 文本视图：贴底滚动，手动上翻即暂停。
   useEffect(() => {
@@ -47,8 +52,7 @@ export function MSession(): React.ReactNode {
     }
   }, [outputText, autoScroll, view]);
 
-  // 终端视图没有测量面板时（未开终端前），先用估算宽度兜底一次，
-  // 避免会话以 100 列启动把首屏撑碎。
+  // 终端视图兜底宽度，避免会话以 100 列启动撑碎首屏。
   useEffect(() => {
     if (!id || connection !== 'open' || view !== 'term') return;
     const timer = setTimeout(() => resize(id, 44, 22), 400);
@@ -73,19 +77,25 @@ export function MSession(): React.ReactNode {
       <p className="muted" style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
         <Link to="/m" style={{ color: 'inherit' }}>← 返回</Link>
         <span>{session ? `${session.agent} · ${session.status}` : `会话 ${id.slice(0, 8)}`}</span>
+        {intent.mode && (
+          <span className="badge running" title="从输出状态行识别；点右侧「切换模式」改变">模式：{intent.mode}</span>
+        )}
         <span style={{ flex: 1 }} />
         <span>{connection === 'open' ? '🟢' : '🟡'}</span>
       </p>
 
-      {/* 视图切换 + 输出区 */}
+      {/* 视图切换：终端视图受 TUI 备用缓冲区限制没有回滚——看历史切「文本」 */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
         <div className="seg">
-          {([['term', '终端'], ['text', '文本']] as const).map(([v, label]) => (
+          {([['term', '终端'], ['text', '历史']] as const).map(([v, label]) => (
             <button key={v} className={view === v ? 'active' : ''} onClick={() => setView(v)}>
               {label}
             </button>
           ))}
         </div>
+        {view === 'term' && (
+          <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>看完整历史 → 切「历史」</span>
+        )}
       </div>
 
       {view === 'term' ? (
@@ -100,9 +110,54 @@ export function MSession(): React.ReactNode {
             setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 40);
           }}
           className="card mono"
-          style={{ maxHeight: '52vh', overflowY: 'auto', fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+          style={{ maxHeight: '56vh', overflowY: 'auto', fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
         >
-          {outputText ? stripAnsi(outputText).slice(-20000) : <span className="muted">等待 Agent 输出…</span>}
+          {outputText ? stripAnsi(outputText).slice(-80000) : <span className="muted">等待 Agent 输出…</span>}
+        </div>
+      )}
+
+      {/* PTY 智能应答：识别到选择菜单 → 选项变按钮 */}
+      {intent.kind === 'menu' && (
+        <div className="card" style={{ marginTop: 10, borderColor: 'var(--state-waiting)', padding: '10px 12px' }}>
+          <p style={{ margin: '0 0 8px', fontSize: 13 }}>
+            <span className="status-dot" style={{ background: 'var(--state-waiting)' }} />
+            检测到选择请求 —— 点选项直接应答：
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {intent.options.map((o) => (
+              <button
+                key={o.key}
+                className="btn"
+                style={{ textAlign: 'left', fontSize: 13.5, padding: '8px 12px' }}
+                onClick={() => sendInput(id, `${o.key}\r`)}
+              >
+                <span className="mono" style={{ color: 'var(--accent)', marginRight: 8 }}>{o.key}</span>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {intent.kind === 'yn' && (
+        <div className="card" style={{ marginTop: 10, borderColor: 'var(--state-waiting)', padding: '10px 12px' }}>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            <span className="status-dot" style={{ background: 'var(--state-waiting)' }} />
+            检测到确认请求 —— 用下面的「是 / 否」应答
+          </p>
+        </div>
+      )}
+
+      {/* 模式切换（Claude Code：shift+tab 循环权限模式） */}
+      {intent.mode && (
+        <div style={{ marginTop: 8 }}>
+          <button
+            className="btn sm"
+            style={{ fontSize: 12.5 }}
+            title="发送 shift+tab 循环切换权限模式，切换结果以状态行徽章为准"
+            onClick={() => sendInput(id, '\u001b[Z')}
+          >
+            切换模式（当前：{intent.mode}）
+          </button>
         </div>
       )}
 

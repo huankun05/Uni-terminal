@@ -200,8 +200,23 @@ export class TailscaleTransport implements TransportAdapter {
     }
 
     log.info('tailscale serve 已启用', { target });
-    this.cachedAt = 0;
-    return this.detect();
+    // serve 命令成功即为事实；但部分版本的 serve status 查询有延迟或不稳定，
+    // 不能让界面因为状态查询滞后而显示"未就绪"。短暂重试，仍拿不到就以
+    // MagicDNS 名直接构造地址（命令退出码是权威信号）。
+    for (let i = 0; i < 4; i += 1) {
+      const status = await this.detect();
+      if (status.ready) return status;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+    if (!this.cached?.ready && this.dnsName) {
+      this.cached = {
+        mode: this.mode,
+        ready: true,
+        hint: undefined,
+        endpoints: this.endpoints(),
+      };
+    }
+    return this.cached ?? (await this.detect());
   }
 
   async disableServe(): Promise<TransportStatus> {

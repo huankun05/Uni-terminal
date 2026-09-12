@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { Link } from 'react-router';
+
 import { api } from '../../api/client.ts';
 import type { RuntimeIssue } from '../../components/DegradedBanner.tsx';
 import { DirPicker } from '../../components/DirPicker.tsx';
@@ -307,19 +309,30 @@ export function LocalSettings(): React.ReactNode {
         )}
         {tsStatus?.ready ? (
           <>
-            <p style={{ margin: '0 0 6px' }}>
+            <p style={{ margin: '0 0 10px' }}>
               <span className="status-dot" style={{ background: 'var(--state-done)' }} />
-              已发布 —— 手机（同一 Tailscale 账号）通过以下固定地址访问（HTTPS）：
+              已发布。手机浏览器打开下面的地址即可访问（地址<b>永久固定</b>，不用重新配对）：
             </p>
             {tsStatus.endpoints.filter((e) => e.url.startsWith('https://')).map((e) => (
-              <p key={e.url} className="mono" style={{ margin: 0, fontSize: 13, color: 'var(--accent)' }}>{e.url}</p>
+              <div key={e.url} style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', marginBottom: 8 }}>
+                <code className="mono" style={{ flex: 1, fontSize: 15, fontWeight: 600, color: 'var(--accent)', wordBreak: 'break-all' }}>{e.url}</code>
+                <button className="btn sm" onClick={() => {
+                  void navigator.clipboard?.writeText(e.url).then(
+                    () => setTsFeedback({ ok: true, text: '✅ 地址已复制，粘贴到手机浏览器打开' }),
+                    () => window.prompt('请手动复制：', e.url),
+                  );
+                }}>复制</button>
+              </div>
             ))}
-            <p className="muted" style={{ fontSize: 12, margin: '6px 0 10px' }}>
-              地址永久不变。手机需安装 Tailscale 并登录同一账号、开关打开。
+            <p className="muted" style={{ fontSize: 12.5, margin: '0 0 10px' }}>
+              前提：手机装 Tailscale、登录同一账号、开关打开。打开后可在设置页安装到主屏幕。
             </p>
-            <button className="btn danger" disabled={tsBusy} onClick={() => void tailscaleAction('off')}>
-              关闭发布
-            </button>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Link to="/local/pairing"><button className="btn primary">生成配对二维码 → 手机扫码直接连这个地址</button></Link>
+              <button className="btn danger" disabled={tsBusy} onClick={() => void tailscaleAction('off')}>
+                关闭发布
+              </button>
+            </div>
           </>
         ) : (
           <>
@@ -355,12 +368,20 @@ export function LocalSettings(): React.ReactNode {
         )}
         {tunnel?.ready ? (
           <>
-            <p style={{ margin: '0 0 6px' }}>
+            <p style={{ margin: '0 0 10px' }}>
               <span className="status-dot" style={{ background: 'var(--state-done)' }} />
-              隧道运行中 —— 手机可通过以下地址从任何网络访问（HTTPS）：
+              隧道运行中。手机浏览器打开下面的地址即可访问（任何网络，HTTPS）：
             </p>
             {tunnel.endpoints.filter((e) => e.url.startsWith('https://')).map((e) => (
-              <p key={e.url} className="mono" style={{ margin: 0, fontSize: 13, color: 'var(--accent)' }}>{e.url}</p>
+              <div key={e.url} style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', marginBottom: 8 }}>
+                <code className="mono" style={{ flex: 1, fontSize: 15, fontWeight: 600, color: 'var(--accent)', wordBreak: 'break-all' }}>{e.url}</code>
+                <button className="btn sm" onClick={() => {
+                  void navigator.clipboard?.writeText(e.url).then(
+                    () => setCfFeedback({ ok: true, text: '✅ 地址已复制，粘贴到手机浏览器打开' }),
+                    () => window.prompt('请手动复制：', e.url),
+                  );
+                }}>复制</button>
+              </div>
             ))}
             <p className="muted" style={{ fontSize: 12, margin: '6px 0 10px' }}>
               {tunnel.endpoints.find((e) => e.warning)?.warning}

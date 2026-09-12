@@ -8,6 +8,9 @@ import { Pair } from './routes/Pair.tsx';
 import { InAppBrowser } from './routes/InAppBrowser.tsx';
 import { InstallGuide } from './routes/InstallGuide.tsx';
 import { LocalLayout, LocalDashboard } from './routes/local/Dashboard.tsx';
+import { LocalPairing } from './routes/local/Pairing.tsx';
+import { LocalDevices } from './routes/local/Devices.tsx';
+import { LocalDiagnostics } from './routes/local/Diagnostics.tsx';
 import { LocalSettings } from './routes/local/Settings.tsx';
 import { MLayout, MNow } from './routes/m/Now.tsx';
 import { MSession } from './routes/m/Session.tsx';
@@ -24,7 +27,10 @@ createRoot(document.getElementById('root')!).render(
 
         <Route path="/local" element={<LocalLayout />}>
           <Route index element={<LocalDashboard />} />
+          <Route path="pairing" element={<LocalPairing />} />
+          <Route path="devices" element={<LocalDevices />} />
           <Route path="settings" element={<LocalSettings />} />
+          <Route path="diagnostics" element={<LocalDiagnostics />} />
         </Route>
 
         <Route path="/m" element={<MLayout />}>

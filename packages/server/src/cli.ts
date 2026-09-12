@@ -21,13 +21,13 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+
+import { autostartStatus, registerAutostart, unregisterAutostart } from './service/autostart.ts';
 
 const SERVER_ENTRY = resolve(import.meta.dirname, 'index.ts');
 // node:sqlite is still flagged on the Node 22 line; keep in sync with the
 // package.json `start` script.
 const NODE_FLAGS = ['--experimental-sqlite', '--disable-warning=ExperimentalWarning'];
-const TASK_NAME = 'Uni-terminal';
 const FIRST_PORT = 8787;
 const PORT_SCAN = 11;
 
@@ -127,40 +127,21 @@ async function status(): Promise<void> {
 }
 
 async function installService(): Promise<void> {
-  if (process.platform !== 'win32') {
-    console.error('  目前仅支持 Windows（任务计划程序）。');
-    process.exitCode = 1;
-    return;
-  }
-  const cliPath = fileURLToPath(import.meta.url);
-  // Run through the launcher, not the server directly: the launcher detaches
-  // with windowsHide so a log-on start never flashes a console window.
-  const tr = `"${process.execPath}" "${cliPath}" start --background`;
-  const result = await run('schtasks', [
-    '/Create', '/TN', TASK_NAME, '/TR', tr,
-    '/SC', 'ONLOGON', '/F',
-  ]);
-  if (result.code === 0) {
-    console.log(`  已注册开机自启（任务计划程序「${TASK_NAME}」）。`);
+  const result = await registerAutostart();
+  if (result.ok) {
+    console.log(`  已注册开机自启（任务计划程序「Uni-terminal」）。`);
   } else {
-    console.error(`  注册失败（退出码 ${result.code}）：`);
-    console.error(result.output.trimEnd());
+    console.error(`  注册失败：${result.output.trimEnd()}`);
     process.exitCode = 1;
   }
 }
 
 async function uninstallService(): Promise<void> {
-  if (process.platform !== 'win32') {
-    console.error('  目前仅支持 Windows（任务计划程序）。');
-    process.exitCode = 1;
-    return;
-  }
-  const result = await run('schtasks', ['/Delete', '/TN', TASK_NAME, '/F']);
-  if (result.code === 0) {
-    console.log(`  已移除开机自启（任务计划程序「${TASK_NAME}」）。`);
+  const result = await unregisterAutostart();
+  if (result.ok) {
+    console.log(`  已移除开机自启（任务计划程序「Uni-terminal」）。`);
   } else {
-    console.error(`  移除失败（退出码 ${result.code}）：`);
-    console.error(result.output.trimEnd());
+    console.error(`  移除失败：${result.output.trimEnd()}`);
     process.exitCode = 1;
   }
 }
@@ -185,25 +166,6 @@ function printHelp(): void {
 }
 
 // ------------------------------------------------------------------ helpers
-
-function run(cmd: string, args: string[]): Promise<{ code: number; output: string }> {  return new Promise((resolvePromise) => {
-    const child = spawn(cmd, args, { windowsHide: true });
-    let output = '';
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => {
-      output += chunk;
-    });
-    child.stderr?.on('data', (chunk: string) => {
-      output += chunk;
-    });
-    child.on('error', (err) => {
-      output += err.message;
-      resolvePromise({ code: -1, output });
-    });
-    child.on('exit', (code) => resolvePromise({ code: code ?? -1, output }));
-  });
-}
 
 async function probeHealth(port: number): Promise<boolean> {
   try {

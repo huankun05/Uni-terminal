@@ -21,6 +21,7 @@ import { latestConfigBackup, loadConfig, mergeConfig, tryWrite, defaultConfig, t
 import type { DeviceRow, Store } from '../db.ts';
 import { createLogger } from '../logger.ts';
 import { SessionError, SessionHub } from '../session/hub.ts';
+import { autostartStatus, registerAutostart, unregisterAutostart } from '../service/autostart.ts';
 import type { TransportRegistry } from '../transport/lan.ts';
 import { PROXY_HEADERS, hostOnly, isLocalOrigin } from './local.ts';
 
@@ -414,6 +415,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
         configPath: deps.runtime?.configPath,
         issues: deps.runtime?.issues ?? [],
       },
+      /** Pairing page drives its countdown ring off this. */
+      rotateMs: config.security.pairingRotateMs,
       transport: { active: t, all: transport.all },
       agents: agentAvailability(),
       catalog: AGENT_CATALOG.map((a) => ({ id: a.id, label: a.label, upstream: a.upstream })),
@@ -773,6 +776,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }),
   );
 
+  /** One-click autostart (dis)registration from the settings UI. */
+  app.post('/api/local/service/autostart', async (c) => {
+    try {
+      const body = (await readJson(c)) as { enable?: unknown };
+      const result = body.enable === false ? await unregisterAutostart() : await registerAutostart();
+      // The probe caches for a minute; bust it so the UI reflects reality.
+      return c.json({ ok: result.ok, message: result.ok ? undefined : result.output, autostart: await autostart.refresh() });
+    } catch (err) {
+      return handleError(c, err);
+    }
+  });
+
   // --------------------------------------------------------- static assets
 
   app.get('*', (c) => {
@@ -1030,6 +1045,12 @@ class AutostartProbe {
 
     this.cached = { at: Date.now(), value };
     return value;
+  }
+
+  /** Used after a (dis)registration so the UI never shows stale state. */
+  async refresh(): Promise<{ registered: boolean; task: string } | null> {
+    this.cached = undefined;
+    return this.status();
   }
 }
 

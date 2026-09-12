@@ -26,7 +26,10 @@ export function LocalLayout(): React.ReactNode {
     <div className="layout">
       <nav className="muted" style={{ display: 'flex', gap: 16, marginBottom: 16, fontSize: 14 }}>
         <Link to="/local" style={{ color: 'inherit' }}>总览</Link>
+        <Link to="/local/pairing" style={{ color: 'inherit' }}>配对</Link>
+        <Link to="/local/devices" style={{ color: 'inherit' }}>设备</Link>
         <Link to="/local/settings" style={{ color: 'inherit' }}>设置</Link>
+        <Link to="/local/diagnostics" style={{ color: 'inherit' }}>诊断</Link>
       </nav>
       <Outlet />
     </div>

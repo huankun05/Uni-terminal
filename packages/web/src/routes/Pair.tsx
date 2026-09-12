@@ -122,6 +122,26 @@ export function Pair(): React.ReactNode {
     done: '已连接，正在进入控制台…',
   };
 
+  // 没有 id/c 参数 = 直接输地址进来的。这不是错误场景，给出正确入口。
+  if (!id) {
+    return (
+      <div className="layout" style={{ maxWidth: 460, paddingTop: '14vh' }}>
+        <div className="card">
+          <h1>需要从二维码进入</h1>
+          <p style={{ color: 'var(--diff-del)' }}>本页缺少配对参数。</p>
+          <p style={{ fontSize: 14 }}>
+            正确的配对方式：在<b>电脑</b>上打开管理台
+            <code className="mono"> http://127.0.0.1:{window.location.port}/local/pairing </code>
+            → 点「添加设备」生成二维码 → 用本机<b>相机</b>扫码（不要用微信扫）。
+          </p>
+          <p className="muted" style={{ fontSize: 13 }}>
+            二维码只在电脑端出现，因为它只是发起请求；真正的授权发生在电脑屏幕上的「允许」按钮。
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="layout" style={{ maxWidth: 420, paddingTop: '18vh' }}>
       <div className="card">

@@ -181,6 +181,10 @@ export function LocalPairing(): React.ReactNode {
               <p className="muted" style={{ fontSize: 13 }}>
                 无法扫码？在手机浏览器打开 <code className="mono">{`${window.location.origin}/pair`}</code>，
                 输入配对码 <strong className="mono" style={{ fontSize: 15, letterSpacing: 2 }}>{pairing.userCode}</strong>
+                <br />
+                <span style={{ fontSize: 12 }}>
+                  配对码 5 分钟内有效、内容固定；二维码每 30 秒轮换一次内容以防截屏重放——两者不是同步变的。
+                </span>
               </p>
             )}
           </div>

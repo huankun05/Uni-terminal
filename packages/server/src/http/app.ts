@@ -239,7 +239,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * Polling. The credential is handed over exactly once, in the response that
    * observes an approval, so replaying this endpoint yields nothing.
    */
-  app.get('/api/pair/:id/status', (c) => {
+  app.get('/api/pair/:id/status', async (c) => {
     try {
       const pollToken = c.req.header('x-poll-token');
       if (!pollToken) {
@@ -247,7 +247,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
       }
 
       const id = c.req.param('id');
-      const result = pairing.poll(id, pollToken);
+      // wait=1 走长轮询：批准后手机几乎立即拿到凭据（≤300ms），
+      // 而不是等下一轮节拍。不带 wait 的旧路径保持 RFC 8628 节奏。
+      const waitMs = Number(c.req.query('wait') ?? 0);
+      const result = waitMs > 0
+        ? await pairing.pollLong(id, pollToken, waitMs)
+        : pairing.poll(id, pollToken);
 
       // Handing over the credential is a one-shot event, so it must never be
       // spent on a throttled poll: the client would receive a success response
@@ -953,6 +958,8 @@ function listDirectory(requested: string): {
   path: string;
   parent: string | null;
   entries: Array<{ name: string; type: 'dir' | 'file'; size?: number }>;
+  /** Windows only: drive roots, shown when there is no parent to go up to. */
+  drives?: string[];
 } {
   const target = resolve(requested);
   if (!existsSync(target) || !statSync(target).isDirectory()) {
@@ -985,7 +992,32 @@ function listDirectory(requested: string): {
   );
 
   const parent = dirname(target);
-  return { path: target, parent: parent === target ? null : parent, entries };
+  const atRoot = parent === target;
+  return {
+    path: target,
+    parent: atRoot ? null : parent,
+    entries,
+    ...(atRoot && process.platform === 'win32' ? { drives: windowsDrives() } : {}),
+  };
+}
+
+let drivesCache: { at: number; drives: string[] } | undefined;
+
+/** Probing A:\..Z:\ with existsSync is cheap and cached — drives rarely change. */
+function windowsDrives(): string[] {
+  if (drivesCache && Date.now() - drivesCache.at < 30_000) return drivesCache.drives;
+  const found: string[] = [];
+  for (let code = 65; code <= 90; code += 1) {
+    const letter = String.fromCharCode(code);
+    const root = `${letter}:\\`;
+    try {
+      if (existsSync(root)) found.push(root);
+    } catch {
+      // Unreadable drive — skip.
+    }
+  }
+  drivesCache = { at: Date.now(), drives: found };
+  return found;
 }
 
 /** Per-section merge of an API patch onto the on-disk config document. */

@@ -324,14 +324,13 @@ async function testPairingFlow(): Promise<string> {
   });
   check('本机批准成功', approve.ok);
 
-  // Collect. The pre-approval poll above started the cadence clock, and the
-  // server is entitled to answer `slow_down` if we poll again immediately — so
-  // wait out the advertised interval rather than pretend the rule does not
-  // apply to us.
-  await sleep(5_200);
-  const collect = await fetch(`${BASE}/api/pair/${pairing.id}/status`, {
+  // 长轮询：批准后立即用 wait 收集——这也是真实手机端的行为。
+  // 顺带断言延迟：批准已完成，长轮询应在 ~1s 内返回（而不是等 5s 节拍）。
+  const collectStart = Date.now();
+  const collect = await fetch(`${BASE}/api/pair/${pairing.id}/status?wait=15000`, {
     headers: { 'x-poll-token': claimBody.pollToken ?? '' },
   });
+  check('长轮询批准后立即返回（<2s）', Date.now() - collectStart < 2_000, `${Date.now() - collectStart}ms`);
   const collectBody = (await collect.json()) as { status?: string; device?: { name?: string } };
   const cookie = extractCookie(collect);
   check('批准后轮询返回 approved', collectBody.status === 'approved');

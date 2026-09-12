@@ -138,43 +138,47 @@ export function Pair(): React.ReactNode {
     };
   }, [id, challenge]);
 
-  // Polling loop: starts once we have a poll token, honours Retry-After.
+  // 长轮询：请求挂起最长 20 秒，批准后 ~300ms 内就返回——
+  // 这是「电脑点允许 → 手机立刻进入」的关键，而不是靠缩短轮询间隔硬凑。
   useEffect(() => {
     if (phase !== 'polling') return;
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
 
     const tick = async (): Promise<void> => {
-      try {
-        const res = await fetch(`/api/pair/${encodeURIComponent(id)}/status`, {
-          headers: pollToken.current ? { 'x-poll-token': pollToken.current } : {},
-          credentials: 'same-origin',
-        });
-        if (res.status === 401) {
-          if (!cancelled) {
+      while (!cancelled) {
+        try {
+          const res = await fetch(`/api/pair/${encodeURIComponent(id)}/status?wait=20000`, {
+            headers: pollToken.current ? { 'x-poll-token': pollToken.current } : {},
+            credentials: 'same-origin',
+          });
+          if (cancelled) return;
+          if (res.status === 401) {
             setPhase('error');
             setError('配对请求已失效，请在电脑端重新生成二维码');
+            return;
           }
-          return;
+          const retryAfter = Number(res.headers.get('retry-after') ?? '0');
+          const body = (await res.json()) as { status?: string; slowDown?: unknown };
+          if (cancelled) return;
+          if (body.status === 'approved') {
+            setPhase('done');
+            window.location.assign('/m');
+            return;
+          }
+          if (body.slowDown) {
+            await new Promise((r) => setTimeout(r, Math.max(2, retryAfter) * 1000));
+            continue;
+          }
+          // claimed（长轮询超时）——立刻发起下一个长轮询。
+        } catch {
+          await new Promise((r) => setTimeout(r, 3000));
         }
-        const retryAfter = Number(res.headers.get('retry-after') ?? '0');
-        const body = (await res.json()) as { status?: string };
-        if (cancelled) return;
-        if (body.status === 'approved') {
-          setPhase('done');
-          window.location.assign('/m');
-          return;
-        }
-        timer = setTimeout(tick, Math.max(2, retryAfter) * 1000);
-      } catch {
-        timer = setTimeout(tick, 5000);
       }
     };
 
     void tick();
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
   }, [phase, id]);
 

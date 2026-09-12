@@ -358,7 +358,29 @@ export class PairingService {
    * interval earns a `slow_down`, and the interval is then extended for that
    * session, so a misbehaving client cannot simply ignore the hint.
    */
+  /**
+   * 长轮询：批准后 ~300ms 内手机即可拿到凭据，而不是等下一轮 5 秒节拍。
+   *
+   * 长轮询请求本身挂起等待，天然就是节流——所以循环内跳过 slow_down
+   * 节奏限制（拿到 pollToken 的只有认领设备本人，凭据下发又是单次消费，
+   * 连续挂起请求不扩大攻击面）。waitMs 上限 25 秒，防止中间设备超时。
+   */
+  async pollLong(id: string, pollToken: string, waitMs: number): Promise<PollResult> {
+    const deadline = Date.now() + Math.min(waitMs, 25_000);
+    for (;;) {
+      const result = this.pollOnce(id, pollToken, true);
+      if (result.status !== 'claimed' || result.slowDown || Date.now() >= deadline) {
+        return result;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+
   poll(id: string, pollToken: string): PollResult {
+    return this.pollOnce(id, pollToken, false);
+  }
+
+  private pollOnce(id: string, pollToken: string, skipCadence: boolean): PollResult {
     const now = Date.now();
     const row = this.requirePairing(id);
 
@@ -368,7 +390,7 @@ export class PairingService {
 
     const state = this.pollState.get(id) ?? { intervalMs: 5_000, lastPollAt: 0 };
     const elapsed = now - state.lastPollAt;
-    if (state.lastPollAt !== 0 && elapsed < state.intervalMs) {
+    if (!skipCadence && state.lastPollAt !== 0 && elapsed < state.intervalMs) {
       state.intervalMs += 5_000;
       this.pollState.set(id, state);
       // Carry the full status even while throttling. A partial reply is what

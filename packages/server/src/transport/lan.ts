@@ -156,6 +156,7 @@ export function createTransportRegistry(config: UniConfig): TransportRegistry {
 
   const others: TransportAdapter[] = [
     cloudflare,
+    tailscale,
     new UnconfiguredTransport('easytier', '需要安装 EasyTier 并加入同一网络（国内延迟 20-60ms）。'),
     new UnconfiguredTransport('ipv6', '需要家宽分配公网 IPv6 且路由器放行。'),
     new UnconfiguredTransport('frp', '需要一台有公网 IP 的服务器。'),
@@ -163,7 +164,9 @@ export function createTransportRegistry(config: UniConfig): TransportRegistry {
 
   const active = config.transport.mode === 'cloudflare'
     ? cloudflare
-    : (others.find((t) => t.mode === config.transport.mode && t !== cloudflare) ?? lan);
+    : config.transport.mode === 'tailscale'
+      ? tailscale
+      : (others.find((t) => t.mode === config.transport.mode && t !== cloudflare && t !== tailscale) ?? lan);
 
   const all = (): TransportStatus[] => [lan, ...others].map((t) => t.status());
   log.info('传输层就绪', {

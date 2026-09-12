@@ -1,11 +1,39 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Outlet, useNavigate } from 'react-router';
 
+import { api } from '../../api/client.ts';
 import { useLive } from '../../store/live.ts';
 import { formatTime } from '../../lib/format.ts';
 
-/** 三段式底部导航（实施01 §3.2）。 */
+/**
+ * 三段式底部导航（实施01 §3.2）。
+ *
+ * The auth gate matters more than it looks: without it an *unpaired* phone
+ * lands here and the live store starts dialling /ws on a timer — every dial is
+ * a rejected upgrade on the server and a pointless retry loop on the phone.
+ * Asking /api/me first sends a credential-less phone to /pair before any
+ * socket exists (401 inside api.get navigates there automatically).
+ */
 export function MLayout(): React.ReactNode {
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    void api
+      .get('/api/me')
+      .then(() => setAuthed(true))
+      .catch(() => {
+        // 401 已由 client.ts 引去 /pair；其余错误停在提示页。
+      });
+  }, []);
+
+  if (!authed) {
+    return (
+      <div className="layout" style={{ maxWidth: 560 }}>
+        <p className="muted">正在检查配对状态…</p>
+      </div>
+    );
+  }
+
   return (
     <>
       <div style={{ minHeight: 'calc(100vh - 56px)' }}>

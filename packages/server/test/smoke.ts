@@ -193,6 +193,7 @@ async function main(): Promise<void> {
     await testErrorHygiene();
     await testConfigSurface();
     await testDegradedStartupAndPortFallback();
+    await testLanAddressClassification();
   } finally {
     fixture.child.kill();
     await sleep(300);
@@ -764,9 +765,12 @@ async function testDegradedStartupAndPortFallback(): Promise<void> {
   writeFileSync(brokenConfigPath, '{ this is not valid json !!', 'utf8');
 
   // Occupy the default port so the degraded server must fall through to 8788.
+  // Best-effort: if 8787 is already taken on this machine (e.g. the developer
+  // is running their own instance right now), the fallback is already forced.
   const squatter = net.createServer();
   const squatReady = new Promise<void>((resolvePromise) => {
     squatter.once('listening', () => resolvePromise());
+    squatter.once('error', () => resolvePromise());
     squatter.listen(8787, '0.0.0.0');
   });
   await squatReady;
@@ -795,23 +799,27 @@ async function testDegradedStartupAndPortFallback(): Promise<void> {
   });
 
   try {
-    const degradedBase = 'http://127.0.0.1:8788';
-    let up = false;
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch(`${degradedBase}/api/health`);
-        if (res.ok) {
-          up = true;
-          break;
+    // 8787 is guaranteed occupied (squatter or a live instance); the degraded
+    // server must appear on one of the next ports.
+    let degradedBase: string | undefined;
+    for (const port of [8788, 8789, 8790]) {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+          if (res.ok) {
+            degradedBase = `http://127.0.0.1:${port}`;
+            break;
+          }
+        } catch {
+          // Not up yet.
         }
-      } catch {
-        // Not up yet.
+        await sleep(200);
       }
-      await sleep(200);
+      if (degradedBase) break;
     }
-    check('配置损坏仍能启动（降级而非退出）', up);
-    if (!up) return;
+    check('配置损坏仍能启动（降级而非退出）', degradedBase !== undefined);
+    if (!degradedBase) return;
 
     const configRes = await fetch(`${degradedBase}/api/local/config`);
     const configBody = (await configRes.json()) as {
@@ -821,7 +829,7 @@ async function testDegradedStartupAndPortFallback(): Promise<void> {
     check('损坏配置已自动备份', configBody.issues?.every((i) => i.backupPath === undefined || existsSync(i.backupPath!)) === true && readdirSync(dir).some((n) => n.includes('.bak-')));
 
     const service = (await (await fetch(`${degradedBase}/api/local/service`)).json()) as { port?: number };
-    check('端口被占用时顺延到 8788', service.port === 8788, `got ${service.port}`);
+    check('端口被占用时自动顺延', (service.port ?? 0) > 8787, `got ${service.port}`);
 
     // The only backup in this scenario is the copy of the *broken* file taken
     // at startup — restoring it must be refused with a clear reason, not 500.
@@ -837,6 +845,24 @@ async function testDegradedStartupAndPortFallback(): Promise<void> {
       // Best effort.
     }
   }
+}
+
+/**
+ * Pure-function assertions for the LAN endpoint classifier. The QR code is
+ * built from this list's first entry, so a wrong address here is a broken
+ * pairing flow with nothing on screen to explain why (e.g. a Mihomo/Clash
+ * fake-IP TUN address showing up as a "LAN" candidate).
+ */
+async function testLanAddressClassification(): Promise<void> {
+  section('局域网地址分类');
+
+  const { rankAddress } = await import('../src/transport/lan.ts');
+  check('fake-IP TUN 段（198.18/15）被剔除', rankAddress('Mihomo', '198.18.0.1') === null);
+  check('回环地址被剔除', rankAddress('lo', '127.0.0.1') === null);
+  check('链路本地（169.254）被剔除', rankAddress('以太网', '169.254.10.2') === null);
+  check('192.168 段优先', rankAddress('WLAN', '192.168.31.200') === 10);
+  check('虚拟网卡名降级排序', rankAddress('vEthernet (WSL)', '172.20.0.1') === 70);
+  check('非常规地址排最后但仍可用', (rankAddress('eth0', '8.8.8.8') ?? -1) >= 50);
 }
 
 void main().catch((err: unknown) => {

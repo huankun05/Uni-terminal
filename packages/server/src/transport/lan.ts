@@ -37,13 +37,19 @@ export function lanAddresses(): LanAddress[] {
   return found.sort((a, b) => a.rank - b.rank || a.address.localeCompare(b.address));
 }
 
-function rankAddress(iface: string, address: string): number | null {
-  // Never advertise a loopback, link-local (169.254/16, i.e. no DHCP lease) or
-  // a virtual switch the phone can never reach.
+/** Exported for the smoke test — the QR code depends on this classification. */
+export function rankAddress(iface: string, address: string): number | null {
+  // Never advertise a loopback or link-local (169.254/16, i.e. no DHCP lease).
   if (address.startsWith('127.') || address.startsWith('169.254.')) return null;
 
+  // 198.18.0.0/15 is the benchmark range fake-IP TUN adapters (Mihomo / Clash,
+  // sing-box) bind on the host itself. It shows up as a normal-looking private
+  // address but a phone can never route to it — advertising it produces a QR
+  // code that silently fails, so it must be dropped, not merely ranked low.
+  if (/^198\.1[89]\./.test(address)) return null;
+
   const lower = iface.toLowerCase();
-  const virtualHint = /(vethernet|wsl|docker|hyper-v|vmware|virtualbox|loopback|tap|tun|utun|zerotier|tailscale|radmin)/.test(lower)
+  const virtualHint = /(vethernet|wsl|docker|hyper-v|vmware|virtualbox|loopback|tap|tun|utun|zerotier|tailscale|radmin|mihomo|clash|sing-box)/.test(lower)
     ? 40
     : 0;
 

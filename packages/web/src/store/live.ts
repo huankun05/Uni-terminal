@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+import { api } from '../api/client.ts';
 import { LiveSocket, type ServerMessage } from '../api/socket.ts';
 
 /**
@@ -48,11 +49,19 @@ interface LiveState {
 }
 
 let socket: LiveSocket | null = null;
+/**
+ * Consecutive dials that never reached an open socket. A few in a row is a
+ * sleeping server; many in a row with no `hello` (hence no deviceId) usually
+ * means our credential died — probe once and get out of the retry loop instead
+ * of hammering a door that answers 401.
+ */
+let failedDials = 0;
 
 export const useLive = create<LiveState>((set, get) => {
   const dispatch = (msg: ServerMessage): void => {
     switch (msg.t) {
       case 'hello':
+        failedDials = 0;
         set({ local: msg.local, deviceId: msg.deviceId });
         return;
 
@@ -101,10 +110,18 @@ export const useLive = create<LiveState>((set, get) => {
     if (socket) return socket;
     socket = new LiveSocket({
       onOpen: () => {
+        failedDials = 0;
         set({ connection: 'open' });
         flushSubscriptions();
       },
       onClose: () => {
+        failedDials += 1;
+        if (failedDials >= 3 && !get().deviceId) {
+          // api.get throws on 401 and navigates to /pair; a resolved probe
+          // means auth is fine and the server is just unreachable — keep the
+          // normal backoff running.
+          void api.get('/api/me').catch(() => undefined);
+        }
         if (get().connection !== 'retrying') set({ connection: 'retrying' });
       },
       onMessage: dispatch,

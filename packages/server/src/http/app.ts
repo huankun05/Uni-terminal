@@ -958,10 +958,18 @@ function listDirectory(requested: string): {
   path: string;
   parent: string | null;
   entries: Array<{ name: string; type: 'dir' | 'file'; size?: number }>;
-  /** Windows only: drive roots, shown when there is no parent to go up to. */
+  /** 空路径 = 「此电脑」虚拟层级：只显示盘符（Windows），不混入某块盘的内容。 */
   drives?: string[];
+  home: string;
 } {
-  const target = resolve(requested);
+  const home = homedir();
+
+  // 层级语义：空路径 → 「此电脑」（只列盘）；点了某块盘才进入那块盘。
+  if (requested.trim().length === 0 && process.platform === 'win32') {
+    return { path: '', parent: null, entries: [], drives: windowsDrives(), home };
+  }
+
+  const target = resolve(requested.trim().length > 0 ? requested : home);
   if (!existsSync(target) || !statSync(target).isDirectory()) {
     throw new SessionError('bad_request', '路径不存在或不是目录');
   }
@@ -992,12 +1000,11 @@ function listDirectory(requested: string): {
   );
 
   const parent = dirname(target);
-  const atRoot = parent === target;
   return {
     path: target,
-    parent: atRoot ? null : parent,
+    parent: parent === target ? null : parent,
     entries,
-    ...(atRoot && process.platform === 'win32' ? { drives: windowsDrives() } : {}),
+    home,
   };
 }
 

@@ -13,6 +13,7 @@ interface FsListing {
   parent: string | null;
   entries: FsEntry[];
   drives?: string[];
+  home?: string;
 }
 
 /**
@@ -95,8 +96,14 @@ export function DirPicker(props: {
           <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={jump}>跳转</button>
         </div>
 
-        {/* 面包屑 + 上一级 */}
+        {/* 快捷入口 + 面包屑 + 上一级 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, margin: '8px 0 6px', flexWrap: 'wrap', fontSize: 12 }}>
+          {listing?.home && listing.path !== listing.home && (
+            <button className="btn" style={{ padding: '2px 8px' }} onClick={() => browse(listing.home!)}>⌂ 主目录</button>
+          )}
+          {listing && listing.path !== '' && (
+            <button className="btn" style={{ padding: '2px 8px' }} onClick={() => browse('')}>💽 此电脑</button>
+          )}
           {listing?.parent && (
             <button className="btn" style={{ padding: '2px 8px' }} onClick={() => browse(listing.parent!)}>← 上一级</button>
           )}
@@ -139,7 +146,7 @@ export function DirPicker(props: {
 
         <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={props.onClose}>取消</button>
-          <button className="btn primary" disabled={!listing} onClick={() => listing && props.onPick(listing.path)}>
+          <button className="btn primary" disabled={!listing || listing.path === ''} onClick={() => listing && props.onPick(listing.path)}>
             选择当前目录
           </button>
         </div>

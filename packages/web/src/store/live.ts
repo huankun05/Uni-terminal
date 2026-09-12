@@ -44,6 +44,7 @@ interface LiveState {
   subscribe: (sessionId: string) => void;
   unsubscribe: (sessionId: string) => void;
   sendInput: (sessionId: string, data: string) => void;
+  resize: (sessionId: string, cols: number, rows: number) => void;
   interrupt: (sessionId: string) => void;
   refreshSessions: () => void;
 }
@@ -174,6 +175,7 @@ export const useLive = create<LiveState>((set, get) => {
     },
 
     sendInput: (sessionId, data) => socket?.send({ t: 'input', session: sessionId, data }),
+    resize: (sessionId, cols, rows) => socket?.send({ t: 'resize', session: sessionId, cols, rows }),
     interrupt: (sessionId) => socket?.send({ t: 'interrupt', session: sessionId }),
     refreshSessions: () => socket?.send({ t: 'sessions' }),
   };

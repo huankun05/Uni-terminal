@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from 'react-router';
 
 import { useLive, type LiveEvent } from '../../store/live.ts';
 import { ansiTail, stripAnsi } from '../../lib/ansi.ts';
+import { speechSupported, startVoice } from '../../lib/speech.ts';
 
 /**
  * 会话详情（实施01 §3.4/§3.6）：
@@ -34,12 +35,15 @@ const KEY_PANEL: Array<{ label: string; data: string }> = [
 export function MSession(): React.ReactNode {
   const { id = '' } = useParams();
   const location = useLocation();
-  const { subscribe, unsubscribe, events, sendInput, interrupt, connection, sessions } = useLive();
+  const { subscribe, unsubscribe, events, sendInput, interrupt, resize, connection, sessions } = useLive();
   const [draft, setDraft] = useState('');
   const [showKeys, setShowKeys] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [voiceHint, setVoiceHint] = useState('');
+  const [listening, setListening] = useState(false);
   const streamRef = useRef<HTMLDivElement>(null);
   const promptSent = useRef(false);
+  const voiceRef = useRef<{ stop: () => void } | null>(null);
 
   const session = sessions.find((s) => s.id === id);
 
@@ -48,6 +52,38 @@ export function MSession(): React.ReactNode {
     subscribe(id);
     return () => unsubscribe(id);
   }, [id, subscribe, unsubscribe]);
+
+  /**
+   * 自适应终端宽度：TUI（Claude Code 等）按列数绘制，固定 100 列塞进手机
+   * 屏就是截图里那种碎掉的样子。按流式面板的实际像素宽度反推列数并下发
+   * resize，Agent 会以手机宽度重绘。挂载/旋转/首次就绪时各校一次。
+   */
+  useEffect(() => {
+    if (!id || connection !== 'open') return;
+    const apply = (): void => {
+      const el = streamRef.current;
+      if (!el) return;
+      const style = window.getComputedStyle(el);
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.font = `${style.fontSize} ${style.fontFamily}`;
+      const charWidth = ctx.measureText('M').width || 7.5;
+      const cols = Math.max(40, Math.floor((el.clientWidth - 20) / charWidth));
+      const rows = Math.max(12, Math.floor(el.clientHeight / parseFloat(style.lineHeight || '19')));
+      resize(id, cols, rows);
+    };
+    const timer = setTimeout(apply, 500); // 等订阅与首次输出稳定
+    const onWindowResize = (): void => {
+      clearTimeout(timer);
+      apply();
+    };
+    window.addEventListener('resize', onWindowResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', onWindowResize);
+    };
+  }, [id, connection, resize]);
 
   const list: LiveEvent[] = events[id] ?? [];
 
@@ -121,7 +157,7 @@ export function MSession(): React.ReactNode {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -131,7 +167,8 @@ export function MSession(): React.ReactNode {
               setDraft('');
             }
           }}
-          placeholder="发消息给 Agent…"
+          enterKeyHint="send"
+          placeholder="发消息给 Agent…（可用输入法语音键）"
           style={{
             flex: 1,
             background: 'var(--bg-surface)',
@@ -142,6 +179,34 @@ export function MSession(): React.ReactNode {
             fontSize: 14,
           }}
         />
+        <button
+          className="btn"
+          style={listening ? { borderColor: 'var(--diff-del)', color: 'var(--diff-del)' } : undefined}
+          title={speechSupported() ? '语音输入' : '当前环境（HTTP）不支持网页语音识别，可用输入法自带的语音键'}
+          onClick={() => {
+            if (listening) {
+              voiceRef.current?.stop();
+              voiceRef.current = null;
+              setListening(false);
+              return;
+            }
+            if (!speechSupported()) {
+              setVoiceHint('网页语音识别需要 HTTPS 环境；你手机输入法自带的语音键在这里同样可用（它在系统层工作）。');
+              setTimeout(() => setVoiceHint(''), 5000);
+              return;
+            }
+            const v = startVoice(
+              (text) => setDraft((prev) => (prev ? `${prev} ${text}` : text)),
+              () => setListening(false),
+            );
+            if (v) {
+              voiceRef.current = v;
+              setListening(true);
+            }
+          }}
+        >
+          {listening ? '■ 听写中' : '🎤'}
+        </button>
         <button
           className="btn primary"
           onClick={() => {
@@ -154,6 +219,7 @@ export function MSession(): React.ReactNode {
           发送
         </button>
       </div>
+      {voiceHint && <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{voiceHint}</p>}
       {!autoScroll && (
         <button className="btn" style={{ marginTop: 6, fontSize: 12 }} onClick={() => setAutoScroll(true)}>
           ↓ 回到底部（已暂停自动滚动）

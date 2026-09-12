@@ -15,6 +15,12 @@ interface PairView {
   serverFingerprint: string;
 }
 
+function toB64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 /**
  * The pairing public key is registered for a future E2E upgrade; nothing is
  * encrypted with it today (server stores it opaquely).
@@ -27,12 +33,6 @@ interface PairView {
  * on — a rotation endpoint, not a re-pairing.
  */
 async function generatePublicKey(): Promise<string> {
-  const toB64Url = (bytes: Uint8Array): string => {
-    let binary = '';
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  };
-
   if (crypto.subtle) {
     const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
       'deriveBits',
@@ -45,6 +45,13 @@ async function generatePublicKey(): Promise<string> {
   const random = new Uint8Array(48);
   crypto.getRandomValues(random);
   return toB64Url(random);
+}
+
+/** `crypto.randomUUID` is secure-context-only too; never use it here. */
+function clientNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return toB64Url(bytes);
 }
 
 export function Pair(): React.ReactNode {
@@ -76,7 +83,7 @@ export function Pair(): React.ReactNode {
           const claim = await api.post<{ pollToken: string }>(`/api/pair/${encodeURIComponent(id)}/claim`, {
             challenge,
             publicKey: await generatePublicKey(),
-            clientNonce: crypto.randomUUID(),
+            clientNonce: clientNonce(),
           });
           if (cancelled) return;
           pollToken.current = claim.pollToken;
@@ -86,6 +93,9 @@ export function Pair(): React.ReactNode {
         }
       } catch (err) {
         if (cancelled) return;
+        // Raw detail lands in the console (remote-inspectable); the user gets
+        // something actionable instead of a TypeError.
+        console.warn('[pair] claim failed:', err);
         setPhase('error');
         setError(
           err instanceof ApiError

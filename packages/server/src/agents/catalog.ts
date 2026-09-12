@@ -14,7 +14,7 @@
  * binary, so they probe as the package manager instead.
  */
 
-export type AgentTransport = 'acp' | 'pty';
+export type AgentTransport = 'acp' | 'pty' | 'claude-json';
 
 export interface CatalogEntry {
   /** acpx-friendly name, also the id users write in config. */

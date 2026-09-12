@@ -297,7 +297,7 @@ export function mergeConfig(base: UniConfig, patch: Partial<UniConfig>): UniConf
   for (const [id, raw] of Object.entries(patch.agents ?? base.agents)) {
     agents[id] = {
       enabled: raw.enabled ?? true,
-      mode: raw.mode === 'pty' ? 'pty' : 'acp',
+      mode: raw.mode === 'pty' || raw.mode === 'claude-json' ? raw.mode : 'acp',
       ...(raw.command ? { command: raw.command } : {}),
       ...(raw.args ? { args: raw.args } : {}),
       ...(raw.cwd ? { cwd: raw.cwd } : {}),

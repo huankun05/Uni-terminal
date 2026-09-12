@@ -4,6 +4,7 @@ import type { SessionRow, Store } from '../db.ts';
 import type { AgentSetting, UniConfig } from '../config.ts';
 import { lookupAgent } from '../agents/catalog.ts';
 import { startProcess, type RunHandle } from '../agents/driver.ts';
+import { CLAUDE_JSON_ARGS, startClaudeJson, type StructuredHandle } from '../agents/claude-json.ts';
 import { randomId } from '../auth/secrets.ts';
 import { createLogger } from '../logger.ts';
 
@@ -40,6 +41,8 @@ interface Runtime {
   id: string;
   agent: string;
   handle: RunHandle;
+  /** claude-json 结构化驱动：有值时 input 走 JSON 通道而非终端字节。 */
+  structured?: StructuredHandle;
   seq: number;
   status: SessionStatus;
   outputBuffer: string;
@@ -73,7 +76,7 @@ export class SessionError extends Error {
 export function resolveAgentLaunch(
   config: UniConfig,
   agentId: string,
-): { command: string; args: string[]; cwd: string; mode: 'acp' | 'pty' } {
+): { command: string; args: string[]; cwd: string; mode: 'acp' | 'pty' | 'claude-json' } {
   const setting: AgentSetting | undefined = config.agents[agentId];
   if (!setting) {
     throw new SessionError('agent_not_configured', `配置里没有 ${agentId}，请先在电脑端添加它`, 404);
@@ -144,7 +147,7 @@ export class SessionHub {
     this.config = config;
   }
 
-  async start(params: StartParams): Promise<{ session: SessionRow; info: { usesPty: boolean; command: string } }> {
+  async start(params: StartParams): Promise<{ session: SessionRow; info: { usesPty: boolean; command: string; driver: string } }> {
     const launch = resolveAgentLaunch(this.config, params.agent);
     const id = randomId(12);
     const now = Date.now();
@@ -173,14 +176,31 @@ export class SessionHub {
     };
 
     let handle: RunHandle;
+    let structured: StructuredHandle | undefined;
     try {
-      handle = await startProcess({
-        command: launch.command,
-        args: launch.args,
-        cwd,
-        cols: params.cols ?? 100,
-        rows: params.rows ?? 30,
-      });
+      if (launch.mode === 'claude-json') {
+        // 结构化驱动：NDJSON 双向通道，事件映射为 agent.* 卡片事件。
+        // 自定义参数在前（可能是脚本路径），默认旗标在后。
+        const args = [...launch.args.filter((a) => !CLAUDE_JSON_ARGS.includes(a)), ...CLAUDE_JSON_ARGS];
+        structured = startClaudeJson({ command: launch.command, args, cwd });
+        handle = {
+          pid: structured.pid,
+          usesPty: false,
+          write: (data) => structured!.writeRaw(data.replace(/[\r\n]+$/, '')),
+          resize: () => undefined,
+          kill: () => structured!.kill(),
+          onData: () => undefined,
+          onExit: (cb) => structured!.onExit((code) => cb({ exitCode: code })),
+        };
+      } else {
+        handle = await startProcess({
+          command: launch.command,
+          args: launch.args,
+          cwd,
+          cols: params.cols ?? 100,
+          rows: params.rows ?? 30,
+        });
+      }
     } catch (err) {
       // Surface this as a typed error so the client gets an actionable message
       // ("that binary does not exist") instead of an opaque 500.
@@ -202,10 +222,12 @@ export class SessionHub {
       outputBuffer: '',
       flushTimer: undefined,
       meta: { command: launch.command, args: launch.args, cwd: launch.cwd },
+      structured,
     };
     this.runtimes.set(id, runtime);
 
-    handle.onData((chunk) => this.queueOutput(runtime, chunk));
+    structured?.onEvent((event) => this.emit(runtime, event.type, event.payload));
+    if (!structured) handle.onData((chunk) => this.queueOutput(runtime, chunk));
     handle.onExit(({ exitCode }) => this.handleExit(runtime, exitCode));
 
     this.setStatus(runtime, 'running');
@@ -226,11 +248,26 @@ export class SessionHub {
       usesPty: handle.usesPty,
     });
 
-    return { session, info: { usesPty: handle.usesPty, command: launch.command } };
+    return { session, info: { usesPty: handle.usesPty, command: launch.command, driver: launch.mode } };
   }
 
   input(sessionId: string, data: string): void {
     const runtime = this.requireRuntime(sessionId);
+    if (runtime.structured) {
+      // 结构化通道：可解析的 JSON 行原样透传（权限应答等），纯文本包装成 user 消息。
+      const trimmed = data.trim().replace(/[\r\n]+/g, ' ');
+      if (trimmed.startsWith('{')) {
+        try {
+          JSON.parse(trimmed);
+          runtime.structured.writeRaw(trimmed);
+          return;
+        } catch {
+          // 不是合法 JSON——按普通文本发。
+        }
+      }
+      runtime.structured.sendUserText(trimmed);
+      return;
+    }
     runtime.handle.write(data);
   }
 
@@ -242,6 +279,11 @@ export class SessionHub {
   /** Cooperative interrupt: what the user means by "stop". */
   interrupt(sessionId: string): void {
     const runtime = this.requireRuntime(sessionId);
+    if (runtime.structured) {
+      runtime.structured.interrupt();
+      log.info('会话已中断（结构化）', { id: sessionId });
+      return;
+    }
     runtime.handle.write('\u0003');
     log.info('会话已中断', { id: sessionId });
   }

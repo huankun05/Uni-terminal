@@ -249,6 +249,19 @@ export function LocalSettings(): React.ReactNode {
                 <span className="mono">{id}</span>
                 <span className="muted" style={{ marginLeft: 8, fontSize: 13 }}>{setting.command ?? ''}</span>
               </label>
+              <select
+                className="btn sm"
+                value={setting.mode}
+                style={{ fontSize: 12, padding: '4px 6px', background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 6 }}
+                onChange={(e) => {
+                  const label = e.target.value === 'claude-json' ? '结构化(JSON)' : '交互终端';
+                  const note = `${id} 已切换为 ${label} 模式`;
+                  void patch({ agents: { [id]: { ...setting, mode: e.target.value as 'pty' | 'claude-json' } } }, note);
+                }}
+              >
+                <option value="pty">终端</option>
+                <option value="claude-json">结构化</option>
+              </select>
               <button className="btn" disabled={testing === id} onClick={() => void testAgent(id)}>
                 {testing === id ? '测试中…' : '测试'}
               </button>

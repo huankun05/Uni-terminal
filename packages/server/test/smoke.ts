@@ -132,6 +132,14 @@ function startServer(): Fixture {
           // Enabled but pointing at a binary that cannot exist, to prove the
           // failure path produces a clean error rather than a hung request.
           ghost: { enabled: true, mode: 'pty', command: '__no_such_binary__', args: [] },
+          // 结构化驱动夹具：模拟 claude 的 stream-json 协议（init / 文本 /
+          // 工具调用 / 工具结果 / 权限请求，回显输入并应答权限）。
+          cjson: {
+            enabled: true,
+            mode: 'claude-json',
+            command: process.execPath,
+            args: [join(import.meta.dirname, 'fake-claude.mjs')],
+          },
         },
         workspaces: [{ id: 'default', name: 'tmp', path: dir }],
         security: {
@@ -149,6 +157,7 @@ function startServer(): Fixture {
     ),
     'utf8',
   );
+
 
   const entry = join(import.meta.dirname, '..', 'src', 'index.ts');
   const child = spawn(
@@ -186,6 +195,7 @@ async function main(): Promise<void> {
     await testHealthAndIdentity();
     const deviceCookie = await testPairingFlow();
     await testDeviceGate(deviceCookie);
+    await testClaudeJsonDriver(deviceCookie);
     await testSessionAndEvents(deviceCookie);
     await testPollCadence();
     await testRateLimitsAndReplay();
@@ -753,6 +763,69 @@ async function testSameDeviceRepairs(firstCookie: string): Promise<void> {
 
   const me1 = await fetch(`${BASE}/api/me`, { headers: { cookie: firstCookie } });
   check('旧凭据已被轮换失效', me1.status === 401, `got ${me1.status}`);
+}
+
+
+/**
+ * 结构化驱动端到端（claude-json）：用模拟 claude 的 stream-json 协议脚本，
+ * 验证 归一化事件 → 手机卡片 通路：文本回显 / 工具调用 / 工具结果 /
+ * 权限请求 / control_response 应答闭环。
+ */
+/**
+ * 结构化驱动端到端（claude-json）：用模拟 claude 的 stream-json 协议脚本，
+ * 验证 归一化事件 → 手机卡片 通路：文本回显 / 工具调用 / 工具结果 /
+ * 权限请求 / control_response 应答闭环。
+ */
+async function testClaudeJsonDriver(cookie: string): Promise<void> {
+  section('结构化驱动（claude-json）');
+
+  const created = await fetch(`${BASE}/api/sessions`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ agent: 'cjson' }),
+  });
+  const createdBody = (await created.json()) as { session?: { id?: string }; backend?: { driver?: string } };
+  const sessionId = createdBody.session?.id ?? '';
+  check('结构化会话创建成功', created.status === 201 && sessionId.length > 0, `got ${created.status}`);
+  check('报告驱动类型 claude-json', createdBody.backend?.driver === 'claude-json');
+
+  // 纯文本输入 → 服务端包装成 user 消息 → 假 claude 回显 agent.text
+  await fetch(`${BASE}/api/sessions/${sessionId}/input`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ data: 'hello' }),
+  });
+
+  // control_response 应答权限请求（手机允许按钮的等价物）
+  await fetch(`${BASE}/api/sessions/${sessionId}/input`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ data: JSON.stringify({ type: 'control_response', response: { request_id: 'req1', behavior: 'allow' } }) }),
+  });
+
+  // 轮询事件直到权限请求与应答回显都出现
+  let events: Array<{ type: string; payload: Record<string, unknown> }> = [];
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const res = await fetch(`${BASE}/api/sessions/${sessionId}/events?from=0`, { headers: { cookie } });
+    const body = (await res.json()) as { events?: Array<{ type: string; payload: Record<string, unknown> }> };
+    events = body.events ?? [];
+    const hasPermission = events.some((e) => e.type === 'agent.permission');
+    const hasAllowEcho = events.some((e) => e.type === 'agent.text' && String(e.payload?.text ?? '').includes('PERMISSION:allow'));
+    if ((hasPermission && hasAllowEcho) || Date.now() > deadline) break;
+    await sleep(300);
+  }
+
+  const types = events.map((e) => e.type);
+  console.log('  [cj] 事件类型:', types.join(',') || '(空)');
+  for (const e of events) if (e.type === 'agent.stderr') console.log('  [cj][stderr]', String(e.payload?.text ?? '').slice(0, 300));
+  check('事件流包含助手文本（输入回显）', events.some((e) => e.type === 'agent.text' && String(e.payload?.text ?? '').includes('ECHO:hello')));
+  check('事件流包含工具调用', events.some((e) => e.type === 'agent.tool' && e.payload?.name === 'Bash'));
+  check('事件流包含工具结果', types.includes('agent.tool_result'));
+  check('事件流包含权限请求', events.some((e) => e.type === 'agent.permission' && e.payload?.requestId === 'req1'));
+  check('权限应答闭环（control_response 生效）', events.some((e) => e.type === 'agent.text' && String(e.payload?.text ?? '').includes('PERMISSION:allow')));
+
+  await fetch(`${BASE}/api/sessions/${sessionId}`, { method: 'DELETE', headers: { cookie } });
 }
 
 async function testErrorHygiene(): Promise<void> {

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { api } from '../../api/client.ts';
-import { speechSupported, startVoice } from '../../lib/speech.ts';
 import { DirPicker } from '../../components/DirPicker.tsx';
 
 interface AgentInfo {
@@ -141,27 +140,11 @@ export function MNewTask(): React.ReactNode {
           placeholder="要做什么？例如：把 auth 模块的单测补齐，跑通后汇报结果（可用输入法语音键口述）"
           style={{ width: '100%', resize: 'vertical', background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', padding: '8px 10px', fontSize: 14, fontFamily: 'inherit' }}
         />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          <button
-            className="btn"
-            style={{ fontSize: 13 }}
-            title={speechSupported() ? '语音听写任务描述' : '当前环境（HTTP）不支持网页语音识别，可用输入法自带的语音键'}
-            onClick={() => {
-              if (!speechSupported()) {
-                setError('网页语音识别需要 HTTPS 环境；输入法自带的语音键在文本框里同样可用。');
-                return;
-              }
-              startVoice((text) => setTask((prev) => (prev ? `${prev} ${text}` : text)));
-            }}
-          >
-            🎤 语音听写
+        {task && (
+          <button className="btn" style={{ fontSize: 13, marginTop: 8 }} onClick={() => setTask('')}>
+            清空
           </button>
-          {task && (
-            <button className="btn" style={{ fontSize: 13 }} onClick={() => setTask('')}>
-              清空
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
       <button className="btn primary" style={{ width: '100%', marginTop: 14, padding: 12 }} disabled={busy} onClick={() => void launch()}>

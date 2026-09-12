@@ -15,14 +15,36 @@ interface PairView {
   serverFingerprint: string;
 }
 
+/**
+ * The pairing public key is registered for a future E2E upgrade; nothing is
+ * encrypted with it today (server stores it opaquely).
+ *
+ * WebCrypto only exists in a secure context — HTTPS or localhost. The primary
+ * v1 scenario is plain-HTTP LAN, where `crypto.subtle` is undefined on the
+ * phone, so degrade to a random identifier there. Consequence, recorded in
+ * 实施01 §6: devices paired over HTTP will need to re-register a real key
+ * through their (by then authenticated) credential channel before E2E turns
+ * on — a rotation endpoint, not a re-pairing.
+ */
 async function generatePublicKey(): Promise<string> {
-  const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
-    'deriveBits',
-  ]);
-  const spki = await crypto.subtle.exportKey('spki', pair.publicKey);
-  let binary = '';
-  for (const byte of new Uint8Array(spki)) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const toB64Url = (bytes: Uint8Array): string => {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+
+  if (crypto.subtle) {
+    const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
+      'deriveBits',
+    ]);
+    const spki = await crypto.subtle.exportKey('spki', pair.publicKey);
+    return toB64Url(new Uint8Array(spki));
+  }
+
+  // Insecure context: 48 random bytes → 64 base64url chars, same shape.
+  const random = new Uint8Array(48);
+  crypto.getRandomValues(random);
+  return toB64Url(random);
 }
 
 export function Pair(): React.ReactNode {
@@ -65,7 +87,11 @@ export function Pair(): React.ReactNode {
       } catch (err) {
         if (cancelled) return;
         setPhase('error');
-        setError(err instanceof ApiError ? err.message : String(err));
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : '配对请求失败，请刷新重试；若持续失败，请更换系统浏览器（Chrome/Safari）再试',
+        );
       }
     })();
 

@@ -11,6 +11,7 @@ import { LocalLayout, LocalDashboard } from './routes/local/Dashboard.tsx';
 import { LocalPairing } from './routes/local/Pairing.tsx';
 import { LocalDevices } from './routes/local/Devices.tsx';
 import { LocalDiagnostics } from './routes/local/Diagnostics.tsx';
+import { LocalSession } from './routes/local/LocalSession.tsx';
 import { LocalSettings } from './routes/local/Settings.tsx';
 import { MLayout, MNow } from './routes/m/Now.tsx';
 import { MNewTask } from './routes/m/NewTask.tsx';
@@ -32,6 +33,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="devices" element={<LocalDevices />} />
           <Route path="settings" element={<LocalSettings />} />
           <Route path="diagnostics" element={<LocalDiagnostics />} />
+          <Route path="sessions/:id" element={<LocalSession />} />
         </Route>
 
         <Route path="/m" element={<MLayout />}>

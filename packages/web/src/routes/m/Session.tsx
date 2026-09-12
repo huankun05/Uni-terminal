@@ -4,6 +4,7 @@ import { Link, useLocation, useParams } from 'react-router';
 import { useLive, type LiveEvent } from '../../store/live.ts';
 import { stripAnsi } from '../../lib/ansi.ts';
 import { TerminalPane } from '../../components/TerminalPane.tsx';
+import { QuickReplies } from '../../components/QuickReplies.tsx';
 
 /**
  * 会话详情（实施01 §3.4/§3.6，视图按 E3 定案）：
@@ -13,32 +14,12 @@ import { TerminalPane } from '../../components/TerminalPane.tsx';
  *  - 新建任务带来的 prompt 在会话就绪后自动送入。
  */
 
-const QUICK_REPLIES: Array<{ label: string; data: string }> = [
-  { label: '继续', data: '继续\r' },
-  { label: '是', data: 'y\r' },
-  { label: '否', data: 'n\r' },
-  { label: '同意并记住', data: '2\r' },
-  { label: '停止', data: '\u0003' },
-];
-
-const KEY_PANEL: Array<{ label: string; data: string }> = [
-  { label: 'Esc', data: '\u001b' },
-  { label: 'Tab', data: '\t' },
-  { label: '↑', data: '\u001b[A' },
-  { label: '↓', data: '\u001b[B' },
-  { label: 'Enter', data: '\r' },
-  { label: 'y', data: 'y' },
-  { label: 'n', data: 'n' },
-  { label: 'Ctrl+C', data: '\u0003' },
-];
-
 export function MSession(): React.ReactNode {
   const { id = '' } = useParams();
   const location = useLocation();
   const { subscribe, unsubscribe, events, sendInput, interrupt, resize, connection, sessions } = useLive();
   const [view, setView] = useState<'term' | 'text'>('term');
   const [draft, setDraft] = useState('');
-  const [showKeys, setShowKeys] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const streamRef = useRef<HTMLDivElement>(null);
   const promptSent = useRef(false);
@@ -97,28 +78,14 @@ export function MSession(): React.ReactNode {
       </p>
 
       {/* 视图切换 + 输出区 */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 6,
-          marginBottom: 6,
-        }}
-      >
-        {([['term', '终端'], ['text', '文本']] as const).map(([v, label]) => (
-          <button
-            key={v}
-            className="btn"
-            style={{
-              padding: '4px 14px',
-              fontSize: 13,
-              ...(view === v ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : { color: 'var(--text-secondary)' }),
-            }}
-            onClick={() => setView(v)}
-          >
-            {label}
-          </button>
-        ))}
-        <span style={{ flex: 1 }} />
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+        <div className="seg">
+          {([['term', '终端'], ['text', '文本']] as const).map(([v, label]) => (
+            <button key={v} className={view === v ? 'active' : ''} onClick={() => setView(v)}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {view === 'term' ? (
@@ -139,30 +106,8 @@ export function MSession(): React.ReactNode {
         </div>
       )}
 
-      {/* 快捷应答：单行横滑，不打字推进任务 */}
-      <div style={{ display: 'flex', gap: 6, marginTop: 10, overflowX: 'auto', paddingBottom: 4 }}>
-        {QUICK_REPLIES.map((q) => (
-          <button key={q.label} className="btn" style={{ padding: '8px 14px', fontSize: 13, flexShrink: 0 }} onClick={() => sendInput(id, q.data)}>
-            {q.label}
-          </button>
-        ))}
-        <button className="btn" style={{ padding: '8px 14px', fontSize: 13, flexShrink: 0, color: 'var(--text-secondary)' }} onClick={() => setShowKeys((v) => !v)}>
-          {showKeys ? '收起按键' : '按键'}
-        </button>
-        <button className="btn danger" style={{ padding: '8px 14px', fontSize: 13, flexShrink: 0 }} onClick={() => interrupt(id)}>
-          中断
-        </button>
-      </div>
-
-      {showKeys && (
-        <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-          {KEY_PANEL.map((k) => (
-            <button key={k.label} className="btn mono" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => sendInput(id, k.data)}>
-              {k.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* 快捷应答：单行横滑，不打字推进任务（与桌面端共用组件） */}
+      <QuickReplies onSend={(data) => sendInput(id, data)} onInterrupt={() => interrupt(id)} />
 
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <input

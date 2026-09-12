@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, Outlet, useNavigate } from 'react-router';
+import { NavLink, Outlet, useNavigate } from 'react-router';
 
 import { api } from '../../api/client.ts';
 import { useLive } from '../../store/live.ts';
@@ -40,37 +40,15 @@ export function MLayout(): React.ReactNode {
       <div style={{ minHeight: 'calc(100vh - 56px)' }}>
         <Outlet />
       </div>
-      <nav
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          display: 'flex',
-          borderTop: '1px solid var(--border-subtle)',
-          background: 'var(--bg-surface)',
-          paddingBottom: 'env(safe-area-inset-bottom)',
-        }}
-      >
+      <nav className="tabbar">
         {[
           ['/now', '现在'],
           ['/new', '新建'],
           ['/settings', '设置'],
         ].map(([to, label]) => (
-          <Link
-            key={to}
-            to={`/m${to}`}
-            style={{
-              flex: 1,
-              textAlign: 'center',
-              padding: '14px 0',
-              color: 'var(--text-secondary)',
-              textDecoration: 'none',
-              fontSize: 13,
-            }}
-          >
+          <NavLink key={to} to={`/m${to}`} end={to === '/now'} className={({ isActive }) => (isActive ? 'active' : '')}>
             {label}
-          </Link>
+          </NavLink>
         ))}
       </nav>
     </>

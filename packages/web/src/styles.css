@@ -1,7 +1,6 @@
 /**
- * Design tokens (实施01 §8). Dark-first, single accent, exactly three state
- * colors; glass blur is reserved for overlays — never large surfaces, it
- * drags scrolling performance on phones.
+ * Design tokens + 基础组件样式（实施01 §8）。
+ * 暗色优先；单一强调色；状态色只有三个；玻璃质感只用于浮层。
  */
 :root {
   --bg-base: #0b0f16;
@@ -14,6 +13,7 @@
   --text-tertiary: #5d6b83;
 
   --accent: #4f8cff;
+  --accent-soft: rgba(79, 140, 255, 0.14);
 
   --state-running: #4f8cff;
   --state-waiting: #f5a623;
@@ -22,8 +22,9 @@
   --diff-add: #2ea56a;
   --diff-del: #d4544a;
 
-  --radius: 10px;
-  --radius-sm: 6px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 * {
@@ -48,50 +49,69 @@ body {
   font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
 }
 
-.card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-}
-
-.btn {
-  appearance: none;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  padding: 8px 14px;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.btn:hover {
-  border-color: var(--accent);
-}
-
-.btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.btn.danger {
-  border-color: var(--diff-del);
-  color: var(--diff-del);
-}
-
 .muted {
   color: var(--text-secondary);
 }
 
-.banner-danger {
-  background: color-mix(in srgb, var(--diff-del) 14%, var(--bg-surface));
-  border: 1px solid var(--diff-del);
+h1 {
+  font-size: 19px;
+  font-weight: 650;
+  margin: 0 0 4px;
+}
+
+h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0.4px;
+  margin: 26px 0 10px;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* ------------------------------------------------------------- 卡片与徽标 */
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
-  padding: 10px 14px;
-  margin-bottom: 14px;
-  font-size: 14px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+.card.clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.card.clickable:hover {
+  border-color: var(--accent);
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.badge.running {
+  color: var(--state-running);
+  border-color: var(--state-running);
+  background: var(--accent-soft);
+}
+
+.badge.done {
+  color: var(--state-done);
+  border-color: var(--state-done);
 }
 
 .status-dot {
@@ -103,20 +123,265 @@ body {
   vertical-align: 1px;
 }
 
+.banner-danger {
+  background: color-mix(in srgb, var(--diff-del) 14%, var(--bg-surface));
+  border: 1px solid var(--diff-del);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------------ 按钮 */
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn.primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.btn.danger {
+  border-color: color-mix(in srgb, var(--diff-del) 55%, var(--border-subtle));
+  color: var(--diff-del);
+}
+
+.btn.danger:hover:not(:disabled) {
+  border-color: var(--diff-del);
+}
+
+.btn.sm {
+  padding: 4px 10px;
+  font-size: 12.5px;
+}
+
+/* ------------------------------------------------------- 桌面：侧边栏壳 */
+
+.shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 208px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  padding: 20px 12px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar .brand {
+  font-weight: 700;
+  font-size: 15px;
+  padding: 4px 12px 16px;
+  letter-spacing: 0.3px;
+}
+
+.sidebar .brand span {
+  color: var(--accent);
+}
+
+.sidebar a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.sidebar a:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.sidebar a.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sidebar .foot {
+  margin-top: auto;
+  padding: 10px 12px 0;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  word-break: break-all;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  padding: 28px 32px;
+  max-width: 980px;
+}
+
+.content > .page-sub {
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  margin: 0 0 20px;
+}
+
+/* 窄屏下侧边栏退化为顶部横排 */
+@media (max-width: 860px) {
+  .shell {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    padding: 10px 12px;
+  }
+  .sidebar .brand {
+    padding: 0 10px 0 0;
+  }
+  .sidebar a {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .sidebar .foot {
+    display: none;
+  }
+  .content {
+    padding: 18px 16px;
+  }
+}
+
+/* --------------------------------------------------------- 手机：布局 */
+
 .layout {
   max-width: 720px;
   margin: 0 auto;
   padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
 }
 
-h1 {
-  font-size: 18px;
+.tabbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  backdrop-filter: blur(10px);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tabbar a {
+  flex: 1;
+  text-align: center;
+  padding: 12px 0 10px;
+  color: var(--text-tertiary);
+  text-decoration: none;
+  font-size: 12.5px;
+}
+
+.tabbar a.active {
+  color: var(--accent);
   font-weight: 600;
 }
 
-h2 {
-  font-size: 15px;
-  font-weight: 600;
+/* 分段控件（终端/文本切换） */
+.seg {
+  display: inline-flex;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.seg button {
+  appearance: none;
+  border: none;
+  background: transparent;
   color: var(--text-secondary);
-  margin: 20px 0 8px;
+  font-size: 13px;
+  padding: 4px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.seg button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 统计卡 */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 16px 0 8px;
+}
+
+.stat {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.stat .num {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.stat .label {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* 会话行 */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 14px;
+}
+
+.row:last-child {
+  border-bottom: none;
 }

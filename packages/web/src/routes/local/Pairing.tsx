@@ -41,6 +41,8 @@ export function LocalPairing(): React.ReactNode {
   const [requests, setRequests] = useState<PairingRequest[]>([]);
   const [rotateMs, setRotateMs] = useState(30_000);
   const [rotation, setRotation] = useState(0);
+  const [rotationProgress, setRotationProgress] = useState(0);
+  const rotationCountdown = Math.max(0, Math.ceil((1 - rotationProgress) * rotateMs / 1000));
   const [message, setMessage] = useState('');
   const rotating = useRef(false);
 
@@ -108,6 +110,16 @@ export function LocalPairing(): React.ReactNode {
     return () => clearInterval(timer);
   }, [pairing, rotateMs, rotate]);
 
+  // 倒计时进度：给「多少秒后自动刷新」一个可见的依据。
+  useEffect(() => {
+    setRotationProgress(0);
+    const start = Date.now();
+    const timer = setInterval(() => {
+      setRotationProgress(Math.min(1, (Date.now() - start) / rotateMs));
+    }, 250);
+    return () => clearInterval(timer);
+  }, [rotateMs, rotation]);
+
   // 待批准请求轮询：claimed 的才会出现在批准卡片里。
   useEffect(() => {
     const timer = setInterval(() => {
@@ -139,7 +151,7 @@ export function LocalPairing(): React.ReactNode {
 
       {pairing && (
         <div className="card" style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', width: 180, height: 180, flexShrink: 0 }}>
+          <div style={{ flexShrink: 0 }}>
             {qrUrl && (
               <img
                 src={qrUrl}
@@ -151,7 +163,12 @@ export function LocalPairing(): React.ReactNode {
                 style={{ borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
               />
             )}
-            <CountdownRing rotateMs={rotateMs} rotation={rotation} size={188} />
+            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+              {rotationCountdown > 0 ? `${rotationCountdown} 秒后自动刷新 · 点码立即刷新` : '刷新中…'}
+            </div>
+            <div style={{ marginTop: 4, height: 3, background: 'var(--border-subtle)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${rotationProgress * 100}%`, background: 'var(--accent)', transition: 'width .25s linear' }} />
+            </div>
           </div>
           <div style={{ minWidth: 200 }}>
             <p style={{ margin: '0 0 6px' }}>
@@ -189,45 +206,3 @@ export function LocalPairing(): React.ReactNode {
   );
 }
 
-/** 倒计时环：SVG 圆环随剩余时间收缩，rotation 变化时重置动画。 */
-function CountdownRing({ rotateMs, rotation, size }: { rotateMs: number; rotation: number; size: number }): React.ReactNode {
-  const r = 90;
-  const c = 2 * Math.PI * r;
-  const [progress, setProgress] = useState(0);
-
-  useEffect(() => {
-    setProgress(0);
-    const start = Date.now();
-    let raf = 0;
-    const tick = (): void => {
-      const p = Math.min(1, (Date.now() - start) / rotateMs);
-      setProgress(p);
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [rotateMs, rotation]);
-
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 200 200"
-      style={{ position: 'absolute', inset: -4, pointerEvents: 'none' }}
-    >
-      <circle cx="100" cy="100" r={r} fill="none" stroke="var(--border-subtle)" strokeWidth="3" />
-      <circle
-        cx="100"
-        cy="100"
-        r={r}
-        fill="none"
-        stroke="var(--accent)"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeDasharray={c}
-        strokeDashoffset={c * progress}
-        transform="rotate(-90 100 100)"
-      />
-    </svg>
-  );
-}

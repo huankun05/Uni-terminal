@@ -191,6 +191,43 @@ export class PairingService {
       .map((row) => this.view(row.id));
   }
 
+  private readonly codeLookupLimiter = new SlidingWindow(5, 60_000);
+
+  /**
+   * 手动输入配对码的入口（手机没有扫到二维码时的第二条路）。
+   *
+   * 配对码本身显示在屏幕上，安全等级与二维码相同；真正的防线是：
+   * 单次消费 + 5 分钟时效 + 这里对查码尝试的每 IP 限流（5 次/分钟），
+   * 让穷举 8 位无元音字符集在时效内不可行。
+   */
+  byUserCode(rawCode: string, ip: string): { id: string; challenge: string; expiresAt: number } {
+    const verdict = this.codeLookupLimiter.check(ip);
+    if (!verdict.allowed) {
+      throw new PairingError('slow_down', '尝试过于频繁，请稍后再试', 429);
+    }
+    this.codeLookupLimiter.hit(ip);
+
+    const code = rawCode.trim().toUpperCase();
+    if (!/^[BCDFGHJKLMNPQRSTVWXZ]{8}$/.test(code)) {
+      throw new PairingError('bad_code', '配对码格式不正确');
+    }
+
+    this.store.expirePairings(Date.now());
+    const row = this.store
+      .listPairings(['pending'])
+      .find((p) => p.user_code === code && p.expires_at > Date.now());
+    if (!row) {
+      throw new PairingError(
+        'not_found',
+        '配对码不存在或已过期，请确认电脑端二维码下方显示的最新 8 位码',
+        404,
+      );
+    }
+
+    log.info('配对码已兑换', { ip });
+    return { id: row.id, challenge: row.challenge, expiresAt: row.expires_at };
+  }
+
   /**
    * Phone-side step 1. Binds the request to this specific client and returns
    * the polling credential.

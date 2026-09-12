@@ -587,6 +587,35 @@ async function testRateLimitsAndReplay(): Promise<void> {
     await fetch(`${BASE}/api/local/pairings/${created2.id}/rotate`, { method: 'POST' })
   ).json() as { challenge?: string; qrPayload?: string };
   check('二维码可轮换 challenge', typeof rotated.challenge === 'string' && rotated.qrPayload?.includes('&c='));
+
+  // 手动配对码兑换：正确码给出 id+challenge，错码被拒（限流由每 IP 5 次/分兜底）。
+  const listed = await (await fetch(`${BASE}/api/local/pairings`)).json() as {
+    pairings?: Array<{ userCode?: string }>;
+  };
+  const liveCode = listed.pairings?.find((p) => p.status === 'pending')?.userCode ?? '';
+  const byCode = await fetch(`${BASE}/api/pair/by-code`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: liveCode }),
+  });
+  const byCodeBody = (await byCode.json()) as { id?: string; challenge?: string };
+  check('配对码可兑换出配对会话', byCode.ok && typeof byCodeBody.id === 'string' && typeof byCodeBody.challenge === 'string');
+
+  const badCode = await fetch(`${BASE}/api/pair/by-code`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    // In-charset but not an active code (A is excluded from the code
+    // alphabet entirely, hence B's here).
+    body: JSON.stringify({ code: 'BBBBBBBB' }),
+  });
+  check('错误配对码被拒绝', badCode.status === 404, `got ${badCode.status}`);
+
+  const malformedCode = await fetch(`${BASE}/api/pair/by-code`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: '1234' }),
+  });
+  check('畸形配对码被拒绝', malformedCode.status === 400, `got ${malformedCode.status}`);
 }
 
 async function testRevocation(cookie: string): Promise<void> {

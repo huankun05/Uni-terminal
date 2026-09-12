@@ -172,6 +172,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     });
   });
 
+  /** 手动配对：8 位配对码换 pairingId + challenge（限流在 service 内）。 */
+  app.post('/api/pair/by-code', async (c) => {
+    try {
+      const body = (await readJson(c)) as { code?: unknown };
+      const code = requireString(body.code, 'code', 8);
+      return c.json(pairing.byUserCode(code, clientIp(c.req.raw.headers, remoteAddress(c))));
+    } catch (err) {
+      return handleError(c, err);
+    }
+  });
+
   // ---- pairing: phone side ------------------------------------------------
 
   app.get('/api/pair/:id', (c) => {

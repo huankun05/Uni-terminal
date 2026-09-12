@@ -289,7 +289,8 @@ a {
 .layout {
   max-width: 720px;
   margin: 0 auto;
-  padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+  /* standalone PWA + viewport-fit=cover 时内容会顶进状态栏，补上安全区 */
+  padding: calc(16px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom));
 }
 
 .tabbar {

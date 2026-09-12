@@ -826,9 +826,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post('/api/local/fs/list', async (c) => {
     try {
       const body = (await readJson(c)) as { path?: unknown };
-      const requested = typeof body.path === 'string' && body.path.trim().length > 0
-        ? body.path.trim()
-        : homedir();
+      // 空路径原样透传：listDirectory 把它解释为「此电脑」层级。
+      const requested = typeof body.path === 'string' ? body.path : '';
       return c.json(listDirectory(requested));
     } catch (err) {
       return handleError(c, err);
@@ -847,9 +846,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post('/api/fs/list', requireDevice, async (c) => {
     try {
       const body = (await readJson(c)) as { path?: unknown };
-      const requested = typeof body.path === 'string' && body.path.trim().length > 0
-        ? body.path.trim()
-        : homedir();
+      // 空路径原样透传：listDirectory 把它解释为「此电脑」层级。
+      const requested = typeof body.path === 'string' ? body.path : '';
       return c.json(listDirectory(requested));
     } catch (err) {
       return handleError(c, err);

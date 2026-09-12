@@ -577,7 +577,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.get('/api/local/transport', (c) => c.json({ active: transport.active.status(), all: transport.all() }));
 
-  app.get('/api/local/transport', (c) => c.json({ active: transport.active.status(), all: transport.all }));
 
   /**
    * Tailscale 管理：detect（安装/登录/serve 状态）+ serve 启停。

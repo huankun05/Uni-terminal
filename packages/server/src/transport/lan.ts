@@ -140,7 +140,8 @@ export class UnconfiguredTransport implements TransportAdapter {
 
 export interface TransportRegistry {
   active: TransportAdapter;
-  all: TransportStatus[];
+  /** 每次调用实时计算——适配器状态会变（隧道起停、ts.net 检测）。 */
+  all(): TransportStatus[];
   /** 直接引用，供管理台启停隧道（状态查询走 /api/local/transport）。 */
   cloudflare: CloudflareTransport;
   /** 直接引用，供管理台检测/启停 ts.net 发布。 */
@@ -164,7 +165,7 @@ export function createTransportRegistry(config: UniConfig): TransportRegistry {
     ? cloudflare
     : (others.find((t) => t.mode === config.transport.mode && t !== cloudflare) ?? lan);
 
-  const all = [lan, ...others].map((t) => t.status());
+  const all = (): TransportStatus[] => [lan, ...others].map((t) => t.status());
   log.info('传输层就绪', {
     active: active.mode,
     lanCandidates: lan.endpoints().length,
@@ -172,7 +173,7 @@ export function createTransportRegistry(config: UniConfig): TransportRegistry {
 
   return {
     active,
-    all: () => [lan, ...others].map((t) => t.status()),
+    all,
     cloudflare,
     tailscale,
   };

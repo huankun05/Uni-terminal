@@ -57,7 +57,8 @@ export class CloudflareTransport implements TransportAdapter {
   status(): TransportStatus {
     // ready 只看隧道本身——局域网地址是备用门牌，不代表隧道可用，
     // 否则「隧道运行中」会在根本没连上时也亮绿灯。
-    const endpoints = this.running ? this.endpoints() : [];
+    const running = this.running;
+    const endpoints = running ? this.endpoints() : [];
     const hint =
       this.state === 'error'
         ? `隧道启动失败：${this.detail}`

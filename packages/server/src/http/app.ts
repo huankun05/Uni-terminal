@@ -580,6 +580,46 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get('/api/local/transport', (c) => c.json({ active: transport.active.status(), all: transport.all }));
 
   /**
+   * Tailscale 管理：detect（安装/登录/serve 状态）+ serve 启停。
+   * serve 配置持久化在 tailscaled 中；启用后翻转 transport.mode 并落盘，
+   * 重启后横幅与二维码直接使用 ts.net 固定 HTTPS 地址。
+   */
+  app.post('/api/local/transport/tailscale', async (c) => {
+    try {
+      const body = (await readJson(c)) as { action?: unknown };
+      const action = requireString(body.action, 'action', 16);
+
+      let status;
+      if (action === 'detect') {
+        status = await transport.tailscale.detect();
+      } else if (action === 'serve') {
+        status = await transport.tailscale.enableServe();
+        config.transport.mode = 'tailscale';
+      } else if (action === 'off') {
+        status = await transport.tailscale.disableServe();
+        config.transport.mode = 'lan';
+      } else {
+        throw new SessionError('bad_request', `未知操作 ${action}`);
+      }
+
+      const path = deps.runtime?.configPath;
+      if (path) {
+        try {
+          const disk = JSON.parse(readFileSync(path, 'utf8')) as Partial<UniConfig>;
+          disk.transport = { ...disk.transport, mode: config.transport.mode };
+          tryWrite(mergeConfig(defaultConfig(), disk), path);
+        } catch {
+          // 落盘失败不影响运行；下次保存配置时再写。
+        }
+      }
+
+      return c.json({ ok: true, mode: config.transport.mode, tailscale: status });
+    } catch (err) {
+      return handleError(c, err);
+    }
+  });
+
+  /**
    * Cloudflare 隧道管理：start / stop / download。
    * 启停同时翻转 transport.mode 并持久化——重启后按配置自动拉起。
    */

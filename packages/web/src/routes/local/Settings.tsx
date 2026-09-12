@@ -51,6 +51,9 @@ export function LocalSettings(): React.ReactNode {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [newWorkspacePath, setNewWorkspacePath] = useState('');
   const [tunnel, setTunnel] = useState<TransportInfo | null>(null);
+  const [tsStatus, setTsStatus] = useState<TransportInfo | null>(null);
+  const [tsDetail, setTsDetail] = useState('');
+  const [tsBusy, setTsBusy] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
   const [customBinary, setCustomBinary] = useState('');
 
@@ -67,8 +70,27 @@ export function LocalSettings(): React.ReactNode {
   const refreshTunnel = (): void => {
     void api
       .get<{ all: TransportInfo[] }>('/api/local/transport')
-      .then((res) => setTunnel(res.all.find((t) => t.mode === 'cloudflare') ?? null))
+      .then((res) => {
+        setTunnel(res.all.find((t) => t.mode === 'cloudflare') ?? null);
+        setTsStatus(res.all.find((t) => t.mode === 'tailscale') ?? null);
+      })
       .catch(() => undefined);
+  };
+
+  const tailscaleAction = async (action: 'detect' | 'serve' | 'off'): Promise<void> => {
+    setTsBusy(true);
+    setTsDetail('');
+    try {
+      const res = await api.post<{ tailscale: TransportInfo }>('/api/local/transport/tailscale', { action });
+      setTsStatus(res.tailscale);
+      if (action === 'serve') setMessage('Tailscale HTTPS 已启用，二维码指向 ts.net 固定地址');
+      if (action === 'off') setMessage('Tailscale 发布已关闭，回到局域网模式');
+    } catch (err) {
+      setTsDetail(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTsBusy(false);
+      refreshTunnel();
+    }
   };
 
   const tunnelAction = async (action: 'start' | 'stop' | 'download', binaryPath?: string): Promise<void> => {
@@ -236,6 +258,49 @@ export function LocalSettings(): React.ReactNode {
           <button className="btn" onClick={() => setPickerOpen(true)}>浏览</button>
           <button className="btn primary" onClick={() => void addWorkspace()}>添加</button>
         </div>
+      </div>
+
+      <h2>组网访问（Tailscale · HTTPS · 固定地址）</h2>
+      <div className="card" style={{ fontSize: 14 }}>
+        {tsStatus?.ready ? (
+          <>
+            <p style={{ margin: '0 0 6px' }}>
+              <span className="status-dot" style={{ background: 'var(--state-done)' }} />
+              已发布 —— 手机（同一 Tailscale 账号）通过以下固定地址访问（HTTPS）：
+            </p>
+            {tsStatus.endpoints.filter((e) => e.url.startsWith('https://')).map((e) => (
+              <p key={e.url} className="mono" style={{ margin: 0, fontSize: 13, color: 'var(--accent)' }}>{e.url}</p>
+            ))}
+            <p className="muted" style={{ fontSize: 12, margin: '6px 0 10px' }}>
+              地址永久不变。手机需安装 Tailscale 并登录同一账号、开关打开。
+            </p>
+            <button className="btn danger" disabled={tsBusy} onClick={() => void tailscaleAction('off')}>
+              关闭发布
+            </button>
+          </>
+        ) : (
+          <>
+            <p style={{ margin: '0 0 8px' }}>
+              <span className="status-dot" style={{ background: 'var(--state-waiting)' }} />
+              {tsStatus?.hint ?? '点「检测状态」读取本机 Tailscale 的安装与登录情况'}
+            </p>
+            <ol className="muted" style={{ fontSize: 12.5, margin: '0 0 10px', paddingLeft: 18, lineHeight: 1.9 }}>
+              <li>电脑安装并登录 Tailscale（<a href="https://tailscale.com/download" target="_blank" rel="noreferrer">下载</a>，登录需梯子，一次即可）</li>
+              <li>管理员在 <a href="https://login.tailscale.com/admin/dns" target="_blank" rel="noreferrer">login.tailscale.com/admin/dns</a> 开启 MagicDNS 与 HTTPS 证书（整个网络一次即可）</li>
+              <li>手机安装 Tailscale、登录同一账号并打开开关（首次登录手机也需要梯子）</li>
+              <li>回这里点「检测状态」→「启用 HTTPS 发布」，然后用显示的 ts.net 地址在手机打开本页</li>
+            </ol>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn primary" disabled={tsBusy} onClick={() => void tailscaleAction('detect')}>
+                {tsBusy ? '处理中…' : '检测状态'}
+              </button>
+              <button className="btn" disabled={tsBusy} onClick={() => void tailscaleAction('serve')}>
+                启用 HTTPS 发布
+              </button>
+            </div>
+            {tsDetail && <p style={{ color: 'var(--state-waiting)', fontSize: 13, marginTop: 8 }}>{tsDetail}</p>}
+          </>
+        )}
       </div>
 
       <h2>外网访问（HTTPS）</h2>

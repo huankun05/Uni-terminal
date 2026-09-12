@@ -24,7 +24,7 @@ export interface WorkspaceSetting {
   path: string;
 }
 
-export type TransportMode = 'lan' | 'cloudflare' | 'easytier' | 'ipv6' | 'frp' | 'manual';
+export type TransportMode = 'lan' | 'cloudflare' | 'tailscale' | 'easytier' | 'ipv6' | 'frp' | 'manual';
 
 export interface ServerConfig {
   host: string;

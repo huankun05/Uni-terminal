@@ -2,6 +2,7 @@ import { networkInterfaces } from 'node:os';
 import type { ServerConfig, TransportMode, UniConfig } from '../config.ts';
 import { createLogger } from '../logger.ts';
 import { CloudflareTransport } from './cloudflare.ts';
+import { TailscaleTransport } from './tailscale.ts';
 import type { AdvertisedEndpoint, TransportAdapter, TransportStatus } from './types.ts';
 
 const log = createLogger('transport');
@@ -142,12 +143,15 @@ export interface TransportRegistry {
   all: TransportStatus[];
   /** 直接引用，供管理台启停隧道（状态查询走 /api/local/transport）。 */
   cloudflare: CloudflareTransport;
+  /** 直接引用，供管理台检测/启停 ts.net 发布。 */
+  tailscale: TailscaleTransport;
 }
 
 export function createTransportRegistry(config: UniConfig): TransportRegistry {
   const lanAddressesFn = (): LanAddress[] => lanAddresses();
   const lan = new LanTransport(config.server, config);
   const cloudflare = new CloudflareTransport(config.server, config, lanAddressesFn);
+  const tailscale = new TailscaleTransport(config.server, config, lanAddressesFn);
 
   const others: TransportAdapter[] = [
     cloudflare,
@@ -166,5 +170,5 @@ export function createTransportRegistry(config: UniConfig): TransportRegistry {
     lanCandidates: lan.endpoints().length,
   });
 
-  return { active, all, cloudflare };
+  return { active, all, cloudflare, tailscale };
 }

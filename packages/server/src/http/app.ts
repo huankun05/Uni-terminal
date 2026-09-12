@@ -577,6 +577,57 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.get('/api/local/transport', (c) => c.json({ active: transport.active.status(), all: transport.all }));
 
+  app.get('/api/local/transport', (c) => c.json({ active: transport.active.status(), all: transport.all }));
+
+  /**
+   * Cloudflare 隧道管理：start / stop / download。
+   * 启停同时翻转 transport.mode 并持久化——重启后按配置自动拉起。
+   */
+  app.post('/api/local/transport/cloudflare', async (c) => {
+    try {
+      const body = (await readJson(c)) as { action?: unknown; binaryPath?: unknown };
+      const action = requireString(body.action, 'action', 16);
+
+      if (action === 'download') {
+        await transport.cloudflare.downloadBinary();
+      } else if (action === 'start') {
+        const binaryPath = optionalString(body.binaryPath, 500);
+        if (binaryPath) config.transport.binaryPath = binaryPath;
+        await transport.cloudflare.start();
+        config.transport.mode = 'cloudflare';
+      } else if (action === 'stop') {
+        await transport.cloudflare.stop();
+        config.transport.mode = 'lan';
+      } else {
+        throw new SessionError('bad_request', `未知操作 ${action}`);
+      }
+
+      // 持久化 transport 变更（与 PATCH /config 同一条写盘路径）。
+      const path = deps.runtime?.configPath;
+      if (path) {
+        try {
+          const disk = JSON.parse(readFileSync(path, 'utf8')) as Partial<UniConfig>;
+          disk.transport = {
+            ...disk.transport,
+            mode: config.transport.mode,
+            binaryPath: config.transport.binaryPath,
+          };
+          tryWrite(mergeConfig(defaultConfig(), disk), path);
+        } catch {
+          // 盘上写不进去不影响运行中的隧道；下次保存配置时再落盘。
+        }
+      }
+
+      return c.json({
+        ok: true,
+        mode: config.transport.mode,
+        cloudflare: transport.cloudflare.status(),
+      });
+    } catch (err) {
+      return handleError(c, err);
+    }
+  });
+
   // ------------------------------------------- configuration surface (§2.3)
 
   /** Everything the settings screen needs: live config + file path + issues. */

@@ -39,6 +39,8 @@ export interface UniConfig {
     mode: TransportMode;
     /** Set when mode is `manual`; any URL the phone should dial. */
     publicUrl?: string;
+    /** cloudflared 可执行文件路径（找到或下载后记录，重启自动拉起隧道）。 */
+    binaryPath?: string;
   };
   agents: Record<string, AgentSetting>;
   workspaces: WorkspaceSetting[];

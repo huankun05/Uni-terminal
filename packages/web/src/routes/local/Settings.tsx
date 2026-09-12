@@ -31,6 +31,13 @@ interface ServiceInfo {
   autostart: { registered: boolean; task: string } | null;
 }
 
+interface TransportInfo {
+  mode: string;
+  ready: boolean;
+  hint?: string;
+  endpoints: Array<{ url: string; label: string; warning?: string }>;
+}
+
 /**
  * 设置页（M2 验收：全程不打开 JSON 就能配好 Agent 与工作区）。
  * 热生效项保存即生效；改端口由服务端标记 requiresRestart。
@@ -43,6 +50,9 @@ export function LocalSettings(): React.ReactNode {
   const [testing, setTesting] = useState<string>('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [newWorkspacePath, setNewWorkspacePath] = useState('');
+  const [tunnel, setTunnel] = useState<TransportInfo | null>(null);
+  const [tunnelBusy, setTunnelBusy] = useState(false);
+  const [customBinary, setCustomBinary] = useState('');
 
   const reloadConfig = (): void => {
     void api.get<ConfigResponse>('/api/local/config').then(setConfig).catch(() => setConfig(null));
@@ -51,7 +61,32 @@ export function LocalSettings(): React.ReactNode {
   useEffect(() => {
     reloadConfig();
     void api.get<ServiceInfo>('/api/local/service').then(setService).catch(() => undefined);
+    void refreshTunnel();
   }, []);
+
+  const refreshTunnel = (): void => {
+    void api
+      .get<{ all: TransportInfo[] }>('/api/local/transport')
+      .then((res) => setTunnel(res.all.find((t) => t.mode === 'cloudflare') ?? null))
+      .catch(() => undefined);
+  };
+
+  const tunnelAction = async (action: 'start' | 'stop' | 'download', binaryPath?: string): Promise<void> => {
+    setTunnelBusy(true);
+    try {
+      await api.post('/api/local/transport/cloudflare', { action, binaryPath });
+      setMessage(
+        action === 'start' ? '隧道已建立，二维码现在指向 HTTPS 外网地址'
+          : action === 'stop' ? '隧道已停止，回到局域网模式'
+            : 'cloudflared 下载完成，可以启动隧道了',
+      );
+    } catch (err) {
+      setMessage(`操作失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTunnelBusy(false);
+      refreshTunnel();
+    }
+  };
 
   const patch = async (body: Record<string, unknown>, note = '已保存'): Promise<void> => {
     try {
@@ -201,6 +236,58 @@ export function LocalSettings(): React.ReactNode {
           <button className="btn" onClick={() => setPickerOpen(true)}>浏览</button>
           <button className="btn primary" onClick={() => void addWorkspace()}>添加</button>
         </div>
+      </div>
+
+      <h2>外网访问（HTTPS）</h2>
+      <div className="card" style={{ fontSize: 14 }}>
+        {tunnel?.ready ? (
+          <>
+            <p style={{ margin: '0 0 6px' }}>
+              <span className="status-dot" style={{ background: 'var(--state-done)' }} />
+              隧道运行中 —— 手机可通过以下地址从任何网络访问（HTTPS）：
+            </p>
+            {tunnel.endpoints.filter((e) => e.url.startsWith('https://')).map((e) => (
+              <p key={e.url} className="mono" style={{ margin: 0, fontSize: 13, color: 'var(--accent)' }}>{e.url}</p>
+            ))}
+            <p className="muted" style={{ fontSize: 12, margin: '6px 0 10px' }}>
+              {tunnel.endpoints.find((e) => e.warning)?.warning}
+            </p>
+            <button className="btn danger" disabled={tunnelBusy} onClick={() => void tunnelAction('stop')}>
+              停止隧道
+            </button>
+          </>
+        ) : (
+          <>
+            <p style={{ margin: '0 0 6px' }}>
+              <span className="status-dot" style={{ background: 'var(--state-waiting)' }} />
+              未启用 —— {tunnel?.hint ?? '启动后获得一个 HTTPS 外网地址，二维码自动指向它'}
+            </p>
+            <p className="muted" style={{ fontSize: 12, margin: '0 0 10px' }}>
+              快速隧道免费、免域名、免配置；地址随机且重启会变（长期固定地址需注册命名隧道）。
+              流量经 Cloudflare 中转。
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button className="btn primary" disabled={tunnelBusy} onClick={() => void tunnelAction('start')}>
+                {tunnelBusy ? '处理中…' : '启动快速隧道'}
+              </button>
+              <button className="btn" disabled={tunnelBusy} onClick={() => void tunnelAction('download')}>
+                下载 cloudflared
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <input
+                value={customBinary}
+                onChange={(e) => setCustomBinary(e.target.value)}
+                placeholder="cloudflared 路径（自动下载失败时手动粘贴，如 D:\\tools\\cloudflared.exe）"
+                className="mono"
+                style={{ flex: 1, fontSize: 12, background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', padding: '6px 8px' }}
+              />
+              <button className="btn" disabled={tunnelBusy || !customBinary.trim()} onClick={() => void tunnelAction('start', customBinary.trim())}>
+                用此路径启动
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <h2>服务</h2>

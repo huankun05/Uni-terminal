@@ -87,6 +87,14 @@ async function main(): Promise<void> {
   const hub = new SessionHub(store, config);
   const transport = createTransportRegistry(config);
 
+  // 配置为 cloudflare 模式时，启动即自动拉起隧道（非阻塞：就绪前横幅先
+  // 展示局域网地址，之后 /api/local/transport 会反映出隧道地址）。
+  if (config.transport.mode === 'cloudflare') {
+    void transport.cloudflare.start().catch((err: Error) => {
+      log.warn('隧道自动启动失败', { reason: err.message });
+    });
+  }
+
   // Probe node-pty once at boot so the startup banner can state plainly
   // whether interactive terminals will work, instead of failing later.
   await loadPty();

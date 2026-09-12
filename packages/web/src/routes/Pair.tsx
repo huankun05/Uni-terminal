@@ -165,6 +165,16 @@ export function Pair(): React.ReactNode {
             window.location.assign('/m');
             return;
           }
+          if (body.status === 'denied') {
+            setPhase('error');
+            setError('电脑端拒绝了本次配对请求。如需接入，请在电脑端重新发起并用新配对码。');
+            return;
+          }
+          if (body.status === 'expired') {
+            setPhase('error');
+            setError('配对已过期（有效期 5 分钟）。请在电脑端重新生成二维码或配对码。');
+            return;
+          }
           if (body.slowDown) {
             await new Promise((r) => setTimeout(r, Math.max(2, retryAfter) * 1000));
             continue;

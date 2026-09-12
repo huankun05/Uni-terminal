@@ -1,6 +1,7 @@
 import { networkInterfaces } from 'node:os';
 import type { ServerConfig, TransportMode, UniConfig } from '../config.ts';
 import { createLogger } from '../logger.ts';
+import { CloudflareTransport } from './cloudflare.ts';
 import type { AdvertisedEndpoint, TransportAdapter, TransportStatus } from './types.ts';
 
 const log = createLogger('transport');
@@ -139,21 +140,25 @@ export class UnconfiguredTransport implements TransportAdapter {
 export interface TransportRegistry {
   active: TransportAdapter;
   all: TransportStatus[];
+  /** 直接引用，供管理台启停隧道（状态查询走 /api/local/transport）。 */
+  cloudflare: CloudflareTransport;
 }
 
 export function createTransportRegistry(config: UniConfig): TransportRegistry {
+  const lanAddressesFn = (): LanAddress[] => lanAddresses();
   const lan = new LanTransport(config.server, config);
+  const cloudflare = new CloudflareTransport(config.server, config, lanAddressesFn);
 
   const others: TransportAdapter[] = [
-    new UnconfiguredTransport('cloudflare', '需要一个域名。配置后可用 cloudflared 建立隧道，免公网 IP、免备案。'),
+    cloudflare,
     new UnconfiguredTransport('easytier', '需要安装 EasyTier 并加入同一网络（国内延迟 20-60ms）。'),
     new UnconfiguredTransport('ipv6', '需要家宽分配公网 IPv6 且路由器放行。'),
     new UnconfiguredTransport('frp', '需要一台有公网 IP 的服务器。'),
   ];
 
-  const active = config.transport.mode === 'lan'
-    ? lan
-    : (others.find((t) => t.mode === config.transport.mode) ?? lan);
+  const active = config.transport.mode === 'cloudflare'
+    ? cloudflare
+    : (others.find((t) => t.mode === config.transport.mode && t !== cloudflare) ?? lan);
 
   const all = [lan, ...others].map((t) => t.status());
   log.info('传输层就绪', {
@@ -161,5 +166,5 @@ export function createTransportRegistry(config: UniConfig): TransportRegistry {
     lanCandidates: lan.endpoints().length,
   });
 
-  return { active, all };
+  return { active, all, cloudflare };
 }

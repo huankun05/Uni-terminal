@@ -52,7 +52,7 @@ export class ServerIdentity {
         const privateKey = createPrivateKey(pem);
         const publicKey = createPublicKey(privateKey);
         const fingerprint = shortFingerprint(publicKey.export({ type: 'spki', format: 'pem' }).toString());
-        log.info('identity loaded', { fingerprint });
+        log.info('服务身份已加载', { fingerprint });
         return new ServerIdentity(privateKey, publicKey, fingerprint);
       } catch (err) {
         throw new Error(
@@ -73,7 +73,7 @@ export class ServerIdentity {
     }
 
     const fingerprint = shortFingerprint(publicKey.export({ type: 'spki', format: 'pem' }).toString());
-    log.info('identity generated', { fingerprint, path: keyPath });
+    log.info('服务身份已生成', { fingerprint, path: keyPath });
     return new ServerIdentity(privateKey, publicKey, fingerprint);
   }
 

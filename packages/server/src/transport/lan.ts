@@ -156,7 +156,7 @@ export function createTransportRegistry(config: UniConfig): TransportRegistry {
     : (others.find((t) => t.mode === config.transport.mode) ?? lan);
 
   const all = [lan, ...others].map((t) => t.status());
-  log.info('transport registry ready', {
+  log.info('传输层就绪', {
     active: active.mode,
     lanCandidates: lan.endpoints().length,
   });

@@ -107,7 +107,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   const localOnly: MiddlewareHandler<Env> = async (c, next) => {
     if (!isLocalRequest(c)) {
-      log.warn('rejected non-local admin request', { path: c.req.path, ip: remoteAddress(c) });
+      log.warn('拒绝了非本机的管理接口请求', { path: c.req.path, ip: remoteAddress(c) });
       return c.json({ error: 'forbidden', message: '本机管理接口仅允许从本机访问' }, 403);
     }
     await next();
@@ -254,7 +254,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
               secure: isTls(c) || config.security.forceSecureCookie === true,
             }),
           );
-          log.info('device credential delivered', { deviceId: result.deviceId });
+          log.info('设备凭据已下发', { deviceId: result.deviceId });
           return c.json({
             status: 'approved',
             deviceId: result.deviceId,
@@ -292,6 +292,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   app.get('/api/agents', requireDevice, (c) => c.json({ agents: agentAvailability() }));
+
+  app.get('/api/workspaces', requireDevice, (c) => c.json({ workspaces: config.workspaces }));
 
   app.get('/api/sessions', requireDevice, (c) =>
     c.json({
@@ -481,7 +483,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       pairing.markApproved(id, issued.device.id);
       pairing.stashToken(id, issued.token);
 
-      log.info('pairing approved from local console', { pairingId: id, deviceId: issued.device.id });
+      log.info('配对已从本机管理台批准', { pairingId: id, deviceId: issued.device.id });
       return c.json({ ok: true, device: devicePayload(issued.device) });
     } catch (err) {
       return handleError(c, err);
@@ -619,7 +621,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       config.transport = next.transport;
       config.security = next.security;
 
-      log.info('config updated via API', { path, requiresRestart: restartKeys });
+      log.info('配置已通过界面更新', { path, requiresRestart: restartKeys });
       return c.json({ ok: true, requiresRestart: restartKeys.length > 0, restartKeys });
     } catch (err) {
       return handleError(c, err);
@@ -815,7 +817,7 @@ function handleError(c: Context, err: unknown): Response {
     );
   }
   const message = err instanceof Error ? err.message : String(err);
-  log.error('unhandled error', { path: c.req.path, message });
+  log.error('未处理的请求错误', { path: c.req.path, message });
   return c.json({ error: 'internal', message: '服务器内部错误' }, 500);
 }
 

@@ -68,7 +68,7 @@ export class DeviceService {
       revoked_at: null,
     };
     this.store.insertDevice(device);
-    log.info('device issued', { id: device.id, name: device.name });
+    log.info('设备凭据已签发', { id: device.id, name: device.name });
     return { device, token };
   }
 
@@ -116,7 +116,7 @@ export class DeviceService {
       throw new DeviceError('not_found', '设备不存在', 404);
     }
     this.store.revokeDevice(id, Date.now());
-    log.warn('device revoked', { id, name: row.name });
+    log.warn('设备已吊销', { id, name: row.name });
   }
 
   /** Removes devices whose credential lapsed; keeps the table tidy. */

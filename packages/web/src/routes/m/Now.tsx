@@ -4,9 +4,10 @@ import { Link, Outlet, useNavigate } from 'react-router';
 import { api } from '../../api/client.ts';
 import { useLive } from '../../store/live.ts';
 import { formatTime } from '../../lib/format.ts';
+import { sessionSummary } from './Session.tsx';
 
 /**
- * 三段式底部导航（实施01 §3.2）。
+ * 三段式底部导航（实施01 §3.2）：现在 / 新建 / 设置。
  *
  * The auth gate matters more than it looks: without it an *unpaired* phone
  * lands here and the live store starts dialling /ws on a timer — every dial is
@@ -52,7 +53,8 @@ export function MLayout(): React.ReactNode {
         }}
       >
         {[
-          ['/', '现在'],
+          ['/now', '现在'],
+          ['/new', '新建'],
           ['/settings', '设置'],
         ].map(([to, label]) => (
           <Link
@@ -77,11 +79,12 @@ export function MLayout(): React.ReactNode {
 
 /**
  * 首屏 = 状态卡（E1：不自动跳进会话；活跃卡整块可点）。
- * 待处理（权限请求）永远置顶——这是唯一"不处理就一直卡着"的事件类型（M3 精化）。
+ * 活跃会话在这里保持订阅，卡片上直接显示"它现在在打什么"——
+ * 掏手机的第一问（跑完了吗/卡住了吗）不点进去就有答案。
  */
 export function MNow(): React.ReactNode {
   const navigate = useNavigate();
-  const { connect, disconnect, connection, sessions, refreshSessions } = useLive();
+  const { connect, disconnect, connection, sessions, events, subscribe, unsubscribe, refreshSessions } = useLive();
 
   useEffect(() => {
     connect();
@@ -91,6 +94,16 @@ export function MNow(): React.ReactNode {
   useEffect(() => {
     if (connection === 'open') refreshSessions();
   }, [connection, refreshSessions]);
+
+  // 状态卡动态：活跃会话全部订阅，离开首屏时退订。
+  const liveIds = sessions.filter((s) => s.live).map((s) => s.id).sort().join(',');
+  useEffect(() => {
+    if (connection !== 'open' || !liveIds) return;
+    for (const id of liveIds.split(',')) subscribe(id);
+    return () => {
+      for (const id of liveIds.split(',')) unsubscribe(id);
+    };
+  }, [connection, liveIds, subscribe, unsubscribe]);
 
   const active = sessions.filter((s) => s.live);
   const finished = sessions.filter((s) => !s.live);
@@ -113,20 +126,28 @@ export function MNow(): React.ReactNode {
           )}
         </div>
       ) : (
-        active.map((s) => (
-          <div
-            key={s.id}
-            className="card"
-            onClick={() => void navigate(`/m/s/${s.id}`)}
-            style={{ cursor: 'pointer', marginBottom: 10, borderColor: 'var(--state-running)' }}
-          >
-            <div>
-              <span className="status-dot" style={{ background: 'var(--state-running)' }} />
-              <strong>{s.agent}</strong> 正在运行
+        active.map((s) => {
+          const summary = sessionSummary(events[s.id] ?? []);
+          return (
+            <div
+              key={s.id}
+              className="card"
+              onClick={() => void navigate(`/m/s/${s.id}`)}
+              style={{ cursor: 'pointer', marginBottom: 10, borderColor: 'var(--state-running)' }}
+            >
+              <div>
+                <span className="status-dot" style={{ background: 'var(--state-running)' }} />
+                <strong>{s.agent}</strong> 正在运行
+                {s.title && <span className="muted" style={{ fontSize: 13 }}> · {s.title}</span>}
+              </div>
+              {summary && (
+                <div className="mono muted" style={{ fontSize: 12, marginTop: 6, whiteSpace: 'pre-wrap', maxHeight: 72, overflow: 'hidden' }}>
+                  {summary}
+                </div>
+              )}
             </div>
-            {s.title && <div className="muted" style={{ fontSize: 14 }}>{s.title}</div>}
-          </div>
-        ))
+          );
+        })
       )}
 
       {finished.length > 0 && (
@@ -145,10 +166,6 @@ export function MNow(): React.ReactNode {
           ))}
         </>
       )}
-
-      <p className="muted" style={{ fontSize: 13, marginTop: 20 }}>
-        还没有会话？M2 完成配对、M3 提供新建任务页后即可从这里启动 Agent。
-      </p>
     </div>
   );
 }

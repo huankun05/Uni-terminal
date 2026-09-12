@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
-    log.info(`received ${signal}, shutting down`);
+    log.info(`收到 ${signal}，正在关闭服务`);
     clearInterval(sweepTimer);
     wsHandle?.closeAll();
     hub.shutdown();
@@ -142,7 +142,7 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('unhandledRejection', (reason) => {
-    log.error('unhandled rejection', { reason: String(reason) });
+    log.error('未处理的 Promise 异常', { reason: String(reason) });
   });
 }
 
@@ -194,7 +194,7 @@ function runRecoveryMode(runtime: RuntimeInfo, reason: Error): void {
 
   const port = runtime.port;
   serve({ fetch: app.fetch, hostname: '127.0.0.1', port }, () => {
-    log.warn('started in recovery mode', { port, reason: reason.message });
+    log.warn('以只读诊断模式启动', { port, reason: reason.message });
     console.log(`\n  ⚠ Uni-terminal 降级运行（只读诊断模式）: http://127.0.0.1:${port}/local/recover`);
     console.log(`  原因：${reason.message}\n`);
   });
@@ -298,7 +298,7 @@ function attachWebSocket(server: HttpServer, deps: WsDeps) {
     );
 
     if (!local && !device) {
-      log.warn('rejected websocket upgrade', { ip: peerAddress(req) });
+      log.warn('拒绝了 WebSocket 连接（未认证）', { ip: peerAddress(req) });
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -342,7 +342,7 @@ function attachWebSocket(server: HttpServer, deps: WsDeps) {
     } catch {
       // Already closed.
     }
-    log.debug('client dropped', { reason });
+    log.debug('客户端断开', { reason });
   }
 
   function bindClient(state: ClientState, deps2: WsDeps): void {
@@ -516,7 +516,7 @@ function attachWebSocket(server: HttpServer, deps: WsDeps) {
           closed += 1;
         }
       }
-      if (closed > 0) log.warn('closed sockets for revoked device', { deviceId, closed });
+      if (closed > 0) log.warn('已断开被吊销设备的在线连接', { deviceId, closed });
       return closed;
     },
 
@@ -555,7 +555,7 @@ void (async () => {
     await main();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.error('fatal startup error', { message });
+    log.error('启动失败', { message });
     console.error(`\n启动失败：${message}\n`);
     process.exit(1);
   }

@@ -13,6 +13,7 @@ import { LocalDevices } from './routes/local/Devices.tsx';
 import { LocalDiagnostics } from './routes/local/Diagnostics.tsx';
 import { LocalSettings } from './routes/local/Settings.tsx';
 import { MLayout, MNow } from './routes/m/Now.tsx';
+import { MNewTask } from './routes/m/NewTask.tsx';
 import { MSession } from './routes/m/Session.tsx';
 import { MSettings } from './routes/m/Settings.tsx';
 
@@ -35,6 +36,8 @@ createRoot(document.getElementById('root')!).render(
 
         <Route path="/m" element={<MLayout />}>
           <Route index element={<MNow />} />
+          <Route path="now" element={<MNow />} />
+          <Route path="new" element={<MNewTask />} />
           <Route path="s/:id" element={<MSession />} />
           <Route path="settings" element={<MSettings />} />
         </Route>

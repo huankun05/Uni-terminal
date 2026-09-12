@@ -204,7 +204,7 @@ export function loadConfig(): ConfigLoadResult {
         message: '未找到配置文件，已按环境普查结果生成默认配置',
         path: target,
       });
-      log.info(`no config found, wrote a starter file`, { path: target });
+      log.info(`未找到配置文件，已生成默认配置`, { path: target });
       return { config, issues, path: target };
     }
     // Data dir unwritable: run with defaults, no file — recovery mode in the
@@ -229,7 +229,7 @@ export function loadConfig(): ConfigLoadResult {
     } catch {
       backupNote = '（备份失败：目录不可写）';
     }
-    log.warn('config is not valid JSON, degrading to defaults', { path: found, backupPath });
+    log.warn('配置文件无法解析，已降级为默认配置', { path: found, backupPath });
     return {
       config: defaultConfig(),
       issues: [
@@ -245,7 +245,7 @@ export function loadConfig(): ConfigLoadResult {
   }
 
   const merged = mergeConfig(defaultConfig(), parsed as Partial<UniConfig>);
-  log.info(`config loaded`, { path: found, agents: Object.keys(merged.agents).length });
+  log.info(`配置已加载`, { path: found, agents: Object.keys(merged.agents).length });
   return { config: merged, issues: [], path: found };
 }
 
@@ -255,7 +255,7 @@ export function tryWrite(config: UniConfig, path: string): boolean {
     writeConfig(config, path);
     return true;
   } catch (err) {
-    log.warn('could not write config file', { path, reason: (err as Error).message });
+    log.warn('配置文件写入失败', { path, reason: (err as Error).message });
     return false;
   }
 }

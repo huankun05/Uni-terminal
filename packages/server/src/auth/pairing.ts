@@ -142,7 +142,7 @@ export class PairingService {
       consumed_at: null,
     });
 
-    log.info('pairing created', { ip, expiresInMs: this.config.security.pairingTtlMs });
+    log.info('配对已创建，等待手机扫码', { ip, expiresInMs: this.config.security.pairingTtlMs });
 
     return {
       id,
@@ -227,7 +227,7 @@ export class PairingService {
         // forces the legitimate user to regenerate, which costs the attacker
         // far more than it costs us.
         this.store.setPairingStatus(id, 'expired');
-        log.warn('pairing invalidated after repeated bad challenges', { attempts });
+        log.warn('连续错误挑战，配对码已作废', { attempts });
         throw new PairingError('invalidated', '校验连续失败，本次配对已作废', 410);
       }
       throw new PairingError('bad_challenge', '二维码已刷新，请重新扫描', 409);
@@ -254,7 +254,7 @@ export class PairingService {
     }
 
     this.pollState.set(id, { intervalMs: 5_000, lastPollAt: 0 });
-    log.info('pairing claimed', { ip: params.ip, fingerprint });
+    log.info('手机已认领配对', { ip: params.ip, fingerprint });
     return { pollToken, pollIntervalMs: 5_000 };
   }
 
@@ -284,7 +284,7 @@ export class PairingService {
     if (!ok) {
       throw new PairingError('not_claimed', '配对状态已变化，请刷新后重试', 409);
     }
-    log.info('pairing approved', { id, deviceId });
+    log.info('配对已批准', { id, deviceId });
   }
 
   /**
@@ -315,7 +315,7 @@ export class PairingService {
     }
     this.store.setPairingStatus(id, 'denied');
     this.pollState.delete(id);
-    log.warn('pairing denied', { id });
+    log.warn('配对已拒绝', { id });
   }
 
   /**
@@ -374,7 +374,7 @@ export class PairingService {
 
   sweep(): void {
     const expired = this.store.expirePairings(Date.now());
-    if (expired > 0) log.debug('expired stale pairings', { count: expired });
+    if (expired > 0) log.debug('清理过期配对', { count: expired });
     this.createGlobal.prune();
     this.createPerIp.prune();
     this.claimPerIp.prune();

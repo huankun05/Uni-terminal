@@ -203,7 +203,7 @@ export class SessionHub {
       mode: launch.mode,
     });
 
-    log.info('session started', {
+    log.info('会话已启动', {
       id,
       agent: params.agent,
       command: launch.command,
@@ -227,7 +227,7 @@ export class SessionHub {
   interrupt(sessionId: string): void {
     const runtime = this.requireRuntime(sessionId);
     runtime.handle.write('\u0003');
-    log.info('session interrupted', { id: sessionId });
+    log.info('会话已中断', { id: sessionId });
   }
 
   /** Hard stop, used when the session is deleted. */
@@ -284,7 +284,7 @@ export class SessionHub {
     }
     this.runtimes.clear();
     this.watchers.clear();
-    log.info('all sessions stopped');
+    log.info('全部会话已停止');
   }
 
   // ---- internals --------------------------------------------------------
@@ -306,7 +306,7 @@ export class SessionHub {
     this.setStatus(runtime, status);
     this.emit(runtime, EVENT_TYPES.exit, { code: exitCode });
     this.runtimes.delete(runtime.id);
-    log.info('session finished', { id: runtime.id, status, exitCode });
+    log.info('会话已结束', { id: runtime.id, status, exitCode });
   }
 
   private setStatus(runtime: Runtime, status: SessionStatus): void {
@@ -346,7 +346,7 @@ export class SessionHub {
       try {
         listener(event);
       } catch (err) {
-        log.warn('event listener threw', { id: runtime.id, error: (err as Error).message });
+        log.warn('事件监听器抛出异常', { id: runtime.id, error: (err as Error).message });
       }
     }
   }

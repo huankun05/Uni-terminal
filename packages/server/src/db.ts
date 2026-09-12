@@ -83,7 +83,7 @@ export class Store {
     this.db.exec('PRAGMA foreign_keys = ON');
     this.db.exec('PRAGMA busy_timeout = 5000');
     this.migrate();
-    log.info('store ready', { file });
+    log.info('存储就绪', { file });
   }
 
   private migrate(): void {

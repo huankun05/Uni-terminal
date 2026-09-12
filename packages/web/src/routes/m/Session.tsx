@@ -1,16 +1,47 @@
-import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useParams } from 'react-router';
 
 import { useLive, type LiveEvent } from '../../store/live.ts';
+import { ansiTail, stripAnsi } from '../../lib/ansi.ts';
 
 /**
- * 会话详情：事件流 + 最小输入区（M3 将换成「事件 → 面板映射」的卡片视图
- * 与快捷应答；此页先把双通道数据打通——文本流 + 原始终端兜底后续挂 xterm）。
+ * 会话详情（实施01 §3.4/§3.6）：
+ *  - 默认视图 = ANSI 剥离后的输出摘要（PTY 模式的可读形态）；
+ *  - 快捷应答按钮：Agent 抛 y/n 时点一下就走，不打字；
+ *  - 按键面板：给 TUI 兜底（Esc / Tab / 方向键 / Ctrl+C）；
+ *  - 新建任务页带来的 prompt 在会话就绪后自动送入。
  */
+
+const QUICK_REPLIES: Array<{ label: string; data: string }> = [
+  { label: '继续', data: '继续\r' },
+  { label: '是', data: 'y\r' },
+  { label: '否', data: 'n\r' },
+  { label: '同意并记住', data: '2\r' },
+  { label: '停止', data: '\u0003' },
+];
+
+const KEY_PANEL: Array<{ label: string; data: string }> = [
+  { label: 'Esc', data: '\u001b' },
+  { label: 'Tab', data: '\t' },
+  { label: '↑', data: '\u001b[A' },
+  { label: '↓', data: '\u001b[B' },
+  { label: 'Enter', data: '\r' },
+  { label: 'y', data: 'y' },
+  { label: 'n', data: 'n' },
+  { label: 'Ctrl+C', data: '\u0003' },
+];
+
 export function MSession(): React.ReactNode {
   const { id = '' } = useParams();
-  const { subscribe, unsubscribe, events, sendInput, interrupt, connection } = useLive();
+  const location = useLocation();
+  const { subscribe, unsubscribe, events, sendInput, interrupt, connection, sessions } = useLive();
   const [draft, setDraft] = useState('');
+  const [showKeys, setShowKeys] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const streamRef = useRef<HTMLDivElement>(null);
+  const promptSent = useRef(false);
+
+  const session = sessions.find((s) => s.id === id);
 
   useEffect(() => {
     if (!id) return;
@@ -20,36 +51,87 @@ export function MSession(): React.ReactNode {
 
   const list: LiveEvent[] = events[id] ?? [];
 
+  // New-task prompt: deliver once, after the agent shell is actually up.
+  const prompt = (location.state as { prompt?: string } | null)?.prompt;
+  useEffect(() => {
+    if (!prompt || promptSent.current) return;
+    if (list.some((e) => e.type === 'session.ready')) {
+      // 给 TUI 一点完成绘制的时间，否则首屏提示还没出就把输入打进了。
+      const timer = setTimeout(() => {
+        sendInput(id, `${prompt}\r`);
+        promptSent.current = true;
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [prompt, list, id, sendInput]);
+
+  // 输出增长时贴底，除非用户手动上翻（保留位置感）。
+  const outputText = useMemo(
+    () => list.filter((e) => e.type === 'session.output').map((e) => (e.payload as { chunk?: string })?.chunk ?? '').join(''),
+    [list],
+  );
+  useEffect(() => {
+    if (autoScroll && streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
+  }, [outputText, autoScroll]);
+
   return (
     <div className="layout" style={{ maxWidth: 560 }}>
-      <p className="muted" style={{ fontSize: 13 }}>
-        <Link to="/m" style={{ color: 'inherit' }}>← 返回</Link> · 连接 {connection === 'open' ? '正常' : '恢复中…'} · 共 {list.length} 条事件
+      <p className="muted" style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Link to="/m" style={{ color: 'inherit' }}>← 返回</Link>
+        <span>{session ? `${session.agent} · ${session.status}` : `会话 ${id.slice(0, 8)}`}</span>
+        <span style={{ flex: 1 }} />
+        <span>{connection === 'open' ? '🟢' : '🟡'}</span>
       </p>
 
-      <div className="card" style={{ maxHeight: '55vh', overflowY: 'auto' }}>
-        {list.length === 0 && <span className="muted">等待事件…</span>}
-        {list.map((e) => (
-          <div key={e.seq} style={{ borderBottom: '1px solid var(--border-subtle)', padding: '6px 0' }}>
-            <span className="mono muted" style={{ fontSize: 11 }}>{e.type}</span>
-            <div className="mono" style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {renderPayload(e)}
-            </div>
-          </div>
-        ))}
+      {/* 输出流：ANSI 剥离摘要 */}
+      <div
+        ref={streamRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 40);
+        }}
+        className="card mono"
+        style={{ maxHeight: '52vh', overflowY: 'auto', fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+      >
+        {outputText ? ansiTail(outputText, 200, 20000) : <span className="muted">等待 Agent 输出…</span>}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+      {/* 快捷应答：不打字推进任务 */}
+      <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+        {QUICK_REPLIES.map((q) => (
+          <button key={q.label} className="btn" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => sendInput(id, q.data)}>
+            {q.label}
+          </button>
+        ))}
+        <button className="btn" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => setShowKeys((v) => !v)}>
+          {showKeys ? '收起按键' : '按键'}
+        </button>
+        <button className="btn danger" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => interrupt(id)}>
+          中断
+        </button>
+      </div>
+
+      {showKeys && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+          {KEY_PANEL.map((k) => (
+            <button key={k.label} className="btn mono" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => sendInput(id, k.data)}>
+              {k.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && draft) {
-              sendInput(id, `${draft}\n`);
+              sendInput(id, `${draft}\r`);
               setDraft('');
             }
           }}
-          placeholder="发送到终端…"
-          className="mono"
+          placeholder="发消息给 Agent…"
           style={{
             flex: 1,
             background: 'var(--bg-surface)',
@@ -60,16 +142,31 @@ export function MSession(): React.ReactNode {
             fontSize: 14,
           }}
         />
-        <button className="btn danger" onClick={() => interrupt(id)}>中断</button>
+        <button
+          className="btn primary"
+          onClick={() => {
+            if (draft) {
+              sendInput(id, `${draft}\r`);
+              setDraft('');
+            }
+          }}
+        >
+          发送
+        </button>
       </div>
+      {!autoScroll && (
+        <button className="btn" style={{ marginTop: 6, fontSize: 12 }} onClick={() => setAutoScroll(true)}>
+          ↓ 回到底部（已暂停自动滚动）
+        </button>
+      )}
     </div>
   );
 }
 
-/** M1 的临时渲染：文本类事件直出，结构化事件先以类型标注占位（M3 换卡片）。 */
-function renderPayload(e: LiveEvent): string {
-  if (e.type === 'session.output' && typeof (e.payload as { chunk?: string })?.chunk === 'string') {
-    return (e.payload as { chunk: string }).chunk;
-  }
-  return JSON.stringify(e.payload).slice(0, 300);
+/** 供「现在」页取最新动态摘要。 */
+export function sessionSummary(list: LiveEvent[]): string {
+  const text = list.filter((e) => e.type === 'session.output').map((e) => (e.payload as { chunk?: string })?.chunk ?? '').join('');
+  return ansiTail(text, 3, 200);
 }
+
+export { stripAnsi };

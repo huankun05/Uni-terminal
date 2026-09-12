@@ -69,11 +69,11 @@ export async function loadPty(): Promise<PtyModule | null> {
   try {
     const mod = (await import('@lydell/node-pty')) as unknown as PtyModule;
     ptyModule = mod;
-    log.info('@lydell/node-pty available, interactive terminals enabled');
+    log.info('@lydell/node-pty 已加载，交互式终端可用');
   } catch (err) {
     ptyModule = null;
     ptyLoadError = (err as Error).message;
-    log.warn('node-pty unavailable, falling back to piped mode', {
+    log.warn('PTY 不可用，降级为管道模式', {
       reason: ptyLoadError,
       fix: 'check that a @lydell/node-pty prebuilt binary exists for this platform',
     });

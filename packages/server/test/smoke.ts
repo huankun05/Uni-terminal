@@ -374,6 +374,12 @@ async function testDeviceGate(cookie: string): Promise<void> {
   const agents = await fetch(`${BASE}/api/agents`, { headers: { cookie } });
   check('带凭据可列出 Agent', agents.ok);
 
+  const workspaces = await fetch(`${BASE}/api/workspaces`, { headers: { cookie } });
+  const wsBody = (await workspaces.json()) as { workspaces?: Array<{ id?: string }> };
+  check('带凭据可列出工作区', workspaces.ok && (wsBody.workspaces?.length ?? 0) > 0);
+  const wsAnon = await fetch(`${BASE}/api/workspaces`);
+  check('无凭据访问工作区被拒绝', wsAnon.status === 401, `got ${wsAnon.status}`);
+
   // The admin surface must never be reachable with a device credential alone.
   const adminViaForward = await fetch(`${BASE}/api/local/bootstrap`, {
     headers: { cookie, 'x-forwarded-for': '203.0.113.9' },

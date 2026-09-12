@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 
 import './styles.css';
+import './pwa';
 import { Landing } from './routes/Landing.tsx';
 import { Pair } from './routes/Pair.tsx';
 import { InAppBrowser } from './routes/InAppBrowser.tsx';

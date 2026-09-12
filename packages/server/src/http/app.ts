@@ -933,10 +933,12 @@ function serveWebAsset(distDir: string, requestPath: string): Response {
   const isAsset = extname(candidate).length > 0;
 
   if (isAsset && existsSync(candidate) && statSync(candidate).isFile()) {
+    // sw.js / manifest 必须可及时更新：浏览器缓存住旧 SW，整个 PWA 就锁死在旧版本上。
+    const immutable = !/^(sw\.js|manifest\.webmanifest)$/.test(candidate.split(/[\\/]/).pop() ?? '');
     return new Response(readFileSync(candidate), {
       headers: {
         'content-type': MIME[extname(candidate)] ?? 'application/octet-stream',
-        'cache-control': 'public, max-age=31536000, immutable',
+        'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
       },
     });
   }

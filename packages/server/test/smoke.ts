@@ -687,6 +687,9 @@ async function testRevocation(cookie: string): Promise<void> {
   const afterRevoke = await fetch(`${BASE}/api/me`, { headers: { cookie: victimCookie } });
   check('被吊销的凭据立即失效', afterRevoke.status === 401, `got ${afterRevoke.status}`);
 
+  const listed = (await (await fetch(`${BASE}/api/local/devices`)).json()) as { devices?: Array<{ id?: string }> };
+  check('吊销后设备从列表除名', listed.devices?.some((d) => d.id === victimId) === false, JSON.stringify(listed.devices?.map((d) => d.id)));
+
   const stillValid = await fetch(`${BASE}/api/me`, { headers: { cookie } });
   check('其他设备不受影响', stillValid.ok);
 }

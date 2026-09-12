@@ -217,9 +217,10 @@ export class Store {
       .run(fields.tokenHash, fields.ua, fields.ip, fields.publicKey, fields.lastSeenAt, fields.expiresAt, id);
   }
 
+  /** 吊销即除名：列表只显示在册设备（吊销的设备需重新配对才回来）。 */
   listDevices(): DeviceRow[] {
     return this.db
-      .prepare('SELECT * FROM devices ORDER BY created_at DESC')
+      .prepare('SELECT * FROM devices WHERE revoked_at IS NULL ORDER BY created_at DESC')
       .all() as unknown as DeviceRow[];
   }
 

@@ -211,7 +211,7 @@ packages/web/src/         （M1 起步，Vite 8 + React 19 + zustand）
 - [x] **M2 桌面配对台 + 配置界面**：配对页（大二维码 + 30s 倒计时环 + 自动轮换 + 待批准请求卡片）· 设备管理（改名 / 吊销即断连）· 设置页（Agent 开关 / 真跑 `--version` 测试 / 环境重扫 / 工作区增删含界面内目录选择器 / 开机自启一键注册）· 诊断页
       ← **里程碑：最小闭环成立**
 - [x] **M3 手机控制台**：三 Tab 首屏（现在 / 新建 / 设置）· 状态卡实时摘要（不进会话就知道它在干什么）· 新建任务页（选 Agent + 工作区 + 任务描述，prompt 自动送进会话）· 会话页（ANSI 剥离输出流 + 快捷应答按钮 继续/是/否/停止 + TUI 按键面板）
-- [ ] **M4 PWA 化**：manifest / Service Worker / 三平台安装引导 / **微信内置浏览器拦截** / xterm 完整终端面板（懒加载）
+- [x] **M4 PWA 化**：manifest（standalone + maskable 图标）· Service Worker 离线外壳（**绝不缓存 `/api/*` 与 `/ws`**，sw.js 本体 no-cache 可更新）· Chromium 一键安装按钮（只在未安装时可用，尊重 prompt 一次机会）· iOS 图文引导 · **微信 / QQ / 微博内置浏览器拦截页** · xterm 终端面板（懒加载）
 - [ ] **M5 真机验收**：iOS 后台保活、Android 一键安装、真跑一个 Claude Code 任务
 
 ### 后续

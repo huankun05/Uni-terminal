@@ -4,7 +4,7 @@
 
 用手机浏览器打开一个网址，就能驱动你电脑上的 AI 编程 Agent —— 不装 App、不经第三方中继、Windows 优先。
 
-> 状态：v0.0.1 · 服务端可用（83 项端到端断言通过），前端开发中。目前可通过 HTTP API 完整跑通「配对 → 建会话 → 驱动 Agent → 事件回放」链路；配置层已加固（配置损坏不退出、端口自动顺延、零配置首次启动）。
+> 状态：v0.0.1 · 服务端可用（83 项端到端断言通过）· 前端骨架与通信层已落地（M1），配对页 / 手机端 / 管理台的最小界面可跑通数据，M2 起完善界面。
 
 ---
 
@@ -174,6 +174,14 @@ packages/server/src/
 └── http/
     ├── app.ts            路由（含配置读写 / 环境普查 / 目录列举等服务面接口）
     └── local.ts          「是否本机请求」判定（安全关键）
+
+packages/web/src/         （M1 起步，Vite 8 + React 19 + zustand）
+├── api/client.ts         HTTP 封装，401 → 重新配对引导
+├── api/socket.ts         ★ WebSocket 心跳 / 指数退避重连 / seq 重放
+├── store/live.ts         ★ 事件流 store（追加 + seq 去重 + 重连自动补齐）
+├── lib/ua.ts             微信 / QQ / 微博 / iOS / standalone 判定
+├── components/DegradedBanner.tsx  降级运行可见化（E6）
+└── routes/               / 分流 · /pair 配对 · /m 手机台 · /local 管理台 · /inapp 拦截
 ```
 
 ## 安全原则
@@ -199,7 +207,7 @@ packages/server/src/
 
 ### 前端 — 进行中
 
-- [ ] **M1 骨架与通信层**：工程搭建、HTTP 封装、WebSocket 心跳与 `seq` 重放、事件流 store
+- [x] **M1 骨架与通信层**：`packages/web`（Vite + React 19 + TS + react-router）· HTTP 封装（401 → 配对引导）· WebSocket 心跳 + 指数退避重连 + `seq` 重放去重 · 事件流 store · 微信/iOS/standalone 判定 · 内置浏览器拦截页 · 降级横幅 · 路由级代码分割
 - [ ] **M2 桌面配对台 + 配置界面**：二维码 30s 轮换、待批准请求弹窗、设备管理与吊销、**全程不打开 JSON 就能配好 Agent 与工作区**
       ← **里程碑：这一步做完，最小闭环成立**
 - [ ] **M3 手机控制台**：状态优先首屏、新建任务、事件 → 面板映射、快捷应答、可折叠终端

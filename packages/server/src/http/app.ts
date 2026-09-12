@@ -1,20 +1,23 @@
 import { Hono } from 'hono';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import type { IncomingMessage } from 'node:http';
-import { extname, join, normalize } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, extname, join, normalize, resolve } from 'node:path';
 import QRCode from 'qrcode';
 
-import { AGENT_CATALOG } from '../agents/catalog.ts';
+import { AGENT_CATALOG, lookupAgent } from '../agents/catalog.ts';
 import { detectAgent, type AgentAvailability } from '../agents/detect.ts';
 import { ptyDiagnostics } from '../agents/driver.ts';
+import { surveyEnvironment } from '../agents/survey.ts';
 import { buildDeviceCookie, clearDeviceCookie, readDeviceToken } from '../auth/cookies.ts';
 import { DeviceError, DeviceService } from '../auth/devices.ts';
 import type { ServerIdentity } from '../auth/identity.ts';
 import { PairingError, PairingService, type PairingStatus } from '../auth/pairing.ts';
 import { clientIp } from '../auth/rateLimit.ts';
-import type { UniConfig } from '../config.ts';
+import { latestConfigBackup, loadConfig, mergeConfig, tryWrite, defaultConfig, type UniConfig } from '../config.ts';
 import type { DeviceRow, Store } from '../db.ts';
 import { createLogger } from '../logger.ts';
 import { SessionError, SessionHub } from '../session/hub.ts';
@@ -36,6 +39,16 @@ export interface AppDeps {
   transport: TransportRegistry;
   webDistDir: string;
   startedAt: number;
+  /**
+   * Mutable runtime facts: the port actually bound (may differ from the config
+   * value after a fallback), the resolved config file path and any degraded
+   * startup issues the admin UI must surface (E6: degradation is visible).
+   */
+  runtime?: {
+    port: number;
+    issues: Array<{ code: string; message: string; path?: string; backupPath?: string }>;
+    configPath?: string;
+  };
   /**
    * Wired by the entry point to the WebSocket layer. Revoking a credential is
    * only half the job — live sockets authenticated with it must drop too, or
@@ -393,9 +406,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get('/api/local/bootstrap', (c) => {
     const t = transport.active.status();
     return c.json({
-      server: { name: config.server.name, port: config.server.port, fingerprint: identity.fingerprint },
+      server: { name: config.server.name, port: deps.runtime?.port ?? config.server.port, fingerprint: identity.fingerprint },
       startedAt: deps.startedAt,
       secureCookies: config.security.forceSecureCookie === true,
+      runtime: {
+        port: deps.runtime?.port ?? config.server.port,
+        configPath: deps.runtime?.configPath,
+        issues: deps.runtime?.issues ?? [],
+      },
       transport: { active: t, all: transport.all },
       agents: agentAvailability(),
       catalog: AGENT_CATALOG.map((a) => ({ id: a.id, label: a.label, upstream: a.upstream })),
@@ -535,6 +553,225 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get('/api/local/agents', (c) => c.json({ agents: agentAvailability(), pty: ptyDiagnostics() }));
 
   app.get('/api/local/transport', (c) => c.json({ active: transport.active.status(), all: transport.all }));
+
+  // ------------------------------------------- configuration surface (§2.3)
+
+  /** Everything the settings screen needs: live config + file path + issues. */
+  app.get('/api/local/config', (c) =>
+    c.json({
+      path: deps.runtime?.configPath,
+      config,
+      issues: deps.runtime?.issues ?? [],
+    }),
+  );
+
+  /**
+   * Partial config update. Sections that can hot-apply (agents, workspaces,
+   * transport, server name, security) take effect immediately on the shared
+   * in-memory config object; binding-related fields can only change on
+   * restart and are reported as such rather than silently ignored.
+   */
+  app.patch('/api/local/config', async (c) => {
+    try {
+      const path = deps.runtime?.configPath;
+      if (!path) {
+        return c.json({ error: 'no_config_file', message: '当前没有可写的配置文件' }, 409);
+      }
+
+      const patch = (await readJson(c)) as Partial<UniConfig>;
+      if (patch.agents !== undefined && (typeof patch.agents !== 'object' || Array.isArray(patch.agents))) {
+        throw new SessionError('bad_request', '字段 agents 必须是对象');
+      }
+      if (patch.workspaces !== undefined && !Array.isArray(patch.workspaces)) {
+        throw new SessionError('bad_request', '字段 workspaces 必须是数组');
+      }
+
+      // Base = what is on disk (falling back to defaults if it still fails to
+      // parse — that is exactly how the UI repairs a broken file), then the
+      // requested patch, then normalisation/clamping.
+      let disk: Partial<UniConfig> = {};
+      try {
+        disk = JSON.parse(readFileSync(path, 'utf8')) as Partial<UniConfig>;
+      } catch {
+        disk = {};
+      }
+      const next = mergeConfig(defaultConfig(), mergeSections(disk, patch));
+
+      if (!tryWrite(next, path)) {
+        return c.json({ error: 'config_unwritable', message: '配置文件不可写，修改未保存' }, 500);
+      }
+
+      // Hot-apply in place: hub/driver/etc. hold a reference to this object.
+      const restartKeys: string[] = [];
+      if (patch.server) {
+        for (const key of ['port', 'host', 'dataDir'] as const) {
+          if (patch.server[key] !== undefined && patch.server[key] !== config.server[key]) {
+            restartKeys.push(`server.${key}`);
+          }
+        }
+        config.server.name = next.server.name;
+      }
+      config.agents = next.agents;
+      config.workspaces = next.workspaces;
+      config.transport = next.transport;
+      config.security = next.security;
+
+      log.info('config updated via API', { path, requiresRestart: restartKeys });
+      return c.json({ ok: true, requiresRestart: restartKeys.length > 0, restartKeys });
+    } catch (err) {
+      return handleError(c, err);
+    }
+  });
+
+  /** One-click recovery for "config broke": restore the newest backup. */
+  app.post('/api/local/config/restore-backup', async (c) => {
+    try {
+      const path = deps.runtime?.configPath;
+      if (!path) return c.json({ error: 'no_config_file', message: '当前没有配置文件可恢复' }, 409);
+      const backup = latestConfigBackup(path);
+      if (!backup) return c.json({ error: 'no_backup', message: '没有可用的配置备份' }, 404);
+
+      // The backup of a *broken* file is itself broken — say so instead of 500.
+      let parsed: Partial<UniConfig>;
+      try {
+        parsed = JSON.parse(readFileSync(backup, 'utf8')) as Partial<UniConfig>;
+      } catch {
+        return c.json(
+          { error: 'backup_invalid', message: `备份文件 ${backup} 同样无法解析，请直接在设置中重写配置` },
+          422,
+        );
+      }
+      const restored = mergeConfig(defaultConfig(), parsed);
+      if (!tryWrite(restored, path)) {
+        return c.json({ error: 'config_unwritable', message: '配置文件不可写，恢复未保存' }, 500);
+      }
+
+      // Reload through the same path a restart would take.
+      const reloaded = loadConfig();
+      config.server = reloaded.config.server;
+      config.agents = reloaded.config.agents;
+      config.workspaces = reloaded.config.workspaces;
+      config.transport = reloaded.config.transport;
+      config.security = reloaded.config.security;
+      if (deps.runtime) deps.runtime.issues = reloaded.issues;
+
+      return c.json({ ok: true, restoredFrom: backup, issues: reloaded.issues });
+    } catch (err) {
+      return handleError(c, err);
+    }
+  });
+
+  /** Re-runs the environment survey without touching the config file. */
+  app.post('/api/local/agents/rescan', (c) => {
+    const survey = surveyEnvironment();
+    return c.json({
+      agents: survey.agents,
+      workspaceCandidates: survey.workspaceCandidates,
+    });
+  });
+
+  /**
+   * Really runs the agent binary once (`--version`). This is the difference
+   * between "the settings page thinks it works" and "it works".
+   */
+  app.post('/api/local/agents/:id/test', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const setting = config.agents[id];
+      const entry = lookupAgent(id);
+      if (!setting && !entry) {
+        return c.json({ error: 'not_found', message: `未知 Agent ${id}` }, 404);
+      }
+
+      const binary =
+        setting?.command ??
+        (entry ? detectAgent(entry).binary : undefined) ??
+        entry?.probe[0];
+      if (!binary) {
+        return c.json({ ok: false, note: '未找到可执行文件，请先扫描或手动指定路径' });
+      }
+
+      const started = Date.now();
+      const result = await runWithTimeout(binary, ['--version'], 15_000);
+      return c.json({
+        ok: result.exitCode === 0,
+        binary,
+        exitCode: result.exitCode,
+        durationMs: Date.now() - started,
+        output: result.output.slice(-4000),
+      });
+    } catch (err) {
+      return handleError(c, err);
+    }
+  });
+
+  /**
+   * Loopback-only directory listing for the in-app path picker. The server has
+   * filesystem access the browser does not; this exposes exactly one level per
+   * call and nothing more.
+   */
+  app.post('/api/local/fs/list', async (c) => {
+    try {
+      const body = (await readJson(c)) as { path?: unknown };
+      const requested = typeof body.path === 'string' && body.path.trim().length > 0
+        ? body.path.trim()
+        : homedir();
+      const target = resolve(requested);
+
+      if (!existsSync(target) || !statSync(target).isDirectory()) {
+        throw new SessionError('bad_request', '路径不存在或不是目录');
+      }
+
+      const entries: Array<{ name: string; type: 'dir' | 'file'; size?: number }> = [];
+      let raw: import('node:fs').Dirent[];
+      try {
+        raw = readdirSync(target, { withFileTypes: true });
+      } catch {
+        throw new SessionError('bad_request', '目录不可读');
+      }
+      for (const item of raw) {
+        if (item.name.startsWith('$')) continue;
+        if (item.isDirectory()) {
+          entries.push({ name: item.name, type: 'dir' });
+        } else if (item.isFile()) {
+          let size: number | undefined;
+          try {
+            size = statSync(join(target, item.name)).size;
+          } catch {
+            // Size is informational only.
+          }
+          entries.push({ name: item.name, type: 'file', size });
+        }
+      }
+      entries.sort((a, b) =>
+        a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1,
+      );
+
+      const parent = dirname(target);
+      return c.json({
+        path: target,
+        parent: parent === target ? null : parent,
+        entries,
+      });
+    } catch (err) {
+      return handleError(c, err);
+    }
+  });
+
+  const autostart = new AutostartProbe();
+  app.get('/api/local/service', async (c) =>
+    c.json({
+      port: deps.runtime?.port ?? config.server.port,
+      configuredPort: config.server.port,
+      pid: process.pid,
+      platform: process.platform,
+      node: process.version,
+      startedAt: deps.startedAt,
+      uptimeMs: Date.now() - deps.startedAt,
+      configPath: deps.runtime?.configPath,
+      autostart: await autostart.status(),
+    }),
+  );
 
   // --------------------------------------------------------- static assets
 
@@ -695,6 +932,106 @@ function serveWebAsset(distDir: string, requestPath: string): Response {
 }
 
 // -------------------------------------------------------------------- misc
+
+/** Per-section merge of an API patch onto the on-disk config document. */
+function mergeSections(
+  disk: Partial<UniConfig>,
+  patch: Partial<UniConfig>,
+): Partial<UniConfig> {
+  const out: Partial<UniConfig> = {};
+  // The spreads are partial at this point; mergeConfig(defaultConfig(), …)
+  // re-completes and clamps every field before anything is persisted.
+  // Sections absent from the patch must still be carried over from disk, or a
+  // narrow PATCH ("rename the server") would silently wipe agents/workspaces.
+  if (disk.server || patch.server) out.server = { ...disk.server, ...patch.server } as UniConfig['server'];
+  if (disk.transport || patch.transport) out.transport = { ...disk.transport, ...patch.transport } as UniConfig['transport'];
+  if (disk.security || patch.security) out.security = { ...disk.security, ...patch.security } as UniConfig['security'];
+  if (disk.agents || patch.agents) out.agents = { ...disk.agents, ...patch.agents };
+  if (disk.workspaces || patch.workspaces) out.workspaces = patch.workspaces ?? disk.workspaces;
+  return out;
+}
+
+/**
+ * Runs a short-lived child process (`--version`) with a hard timeout. Shell
+ * resolution on Windows is required for npm `.cmd`/`.ps1` shims — the same
+ * rule the pipe driver follows.
+ */
+function runWithTimeout(
+  command: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ exitCode: number | null; output: string }> {
+  return new Promise((resolvePromise) => {
+    const isWindows = process.platform === 'win32';
+    // Through the shell on Windows so npm `.cmd`/`.ps1` shims resolve; the
+    // command itself must be quoted, or `C:\Program Files\...` breaks at the
+    // first space.
+    const quoted = isWindows && /\s/.test(command) ? `"${command}"` : command;
+    const child = spawn(quoted, args, {
+      shell: isWindows,
+      windowsHide: true,
+      env: { ...process.env },
+    });
+
+    let output = '';
+    let done = false;
+    const finish = (exitCode: number | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolvePromise({ exitCode, output });
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        // Already gone.
+      }
+      finish(null);
+    }, timeoutMs);
+
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      output += chunk;
+    });
+    child.stderr?.on('data', (chunk: string) => {
+      output += chunk;
+    });
+    child.on('error', (err) => {
+      output += `\n${err.message}`;
+      finish(-1);
+    });
+    child.on('exit', (code) => finish(code));
+  });
+}
+
+/**
+ * Windows Task Scheduler probe for "is autostart registered?", cached for a
+ * minute. Non-Windows platforms report null — there is nothing to probe yet.
+ */
+class AutostartProbe {
+  private cached: { at: number; value: { registered: boolean; task: string } | null } | undefined;
+
+  async status(): Promise<{ registered: boolean; task: string } | null> {
+    if (process.platform !== 'win32') return null;
+    if (this.cached && Date.now() - this.cached.at < 60_000) return this.cached.value;
+
+    const task = 'Uni-terminal';
+    let value: { registered: boolean; task: string } = { registered: false, task };
+    try {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      await promisify(execFile)('schtasks', ['/query', '/tn', task], { windowsHide: true });
+      value = { registered: true, task };
+    } catch {
+      // Task not registered (or schtasks unavailable) — report unregistered.
+    }
+
+    this.cached = { at: Date.now(), value };
+    return value;
+  }
+}
 
 /**
  * Picks the base URL for a QR code.

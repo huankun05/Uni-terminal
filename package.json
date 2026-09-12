@@ -17,6 +17,7 @@
     "test": "npm run test -w @uni-terminal/server",
     "web:dev": "npm run dev -w @uni-terminal/web",
     "web:build": "npm run build -w @uni-terminal/web",
-    "typecheck": "tsc -p packages/server/tsconfig.json"
+    "typecheck": "tsc -p packages/server/tsconfig.json",
+    "cli": "node packages/server/src/cli.ts"
   }
 }

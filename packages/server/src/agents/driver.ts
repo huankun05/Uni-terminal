@@ -10,8 +10,10 @@ const log = createLogger('driver');
  * (keystrokes echo, the app believes it owns a terminal, ANSI redraws are
  * correct). But `node-pty` is a native module — on Windows, if no prebuilt
  * binary matches the running Node ABI, npm falls back to compiling it and that
- * needs Visual Studio Build Tools. A user without them must not be stuck with
- * a server that refuses to boot.
+ * needs Visual Studio Build Tools. We ship `@lydell/node-pty` instead: it only
+ * distributes prebuilt binaries and never invokes node-gyp, so "npm install
+ * and it runs" holds. The pipe fallback below stays as the last resort for
+ * platforms the prebuilds do not cover.
  *
  * So: prefer PTY, fall back to pipes, and tell the truth about which one is in
  * use through `usesPty`, because the UI behaves differently (a pipe-only run
@@ -65,15 +67,15 @@ export async function loadPty(): Promise<PtyModule | null> {
   if (ptyModule !== undefined) return ptyModule;
 
   try {
-    const mod = (await import('node-pty')) as unknown as PtyModule;
+    const mod = (await import('@lydell/node-pty')) as unknown as PtyModule;
     ptyModule = mod;
-    log.info('node-pty available, interactive terminals enabled');
+    log.info('@lydell/node-pty available, interactive terminals enabled');
   } catch (err) {
     ptyModule = null;
     ptyLoadError = (err as Error).message;
     log.warn('node-pty unavailable, falling back to piped mode', {
       reason: ptyLoadError,
-      fix: 'install Visual Studio Build Tools (C++ workload) then re-run npm install',
+      fix: 'check that a @lydell/node-pty prebuilt binary exists for this platform',
     });
   }
   return ptyModule;

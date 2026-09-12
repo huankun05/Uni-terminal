@@ -1,14 +1,17 @@
 import { serve } from '@hono/node-server';
+import { Hono } from 'hono';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
+import net from 'node:net';
 import { resolve } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 
 import { loadPty, ptyDiagnostics } from './agents/driver.ts';
+import { augmentSearchDirs } from './agents/detect.ts';
 import { readDeviceToken } from './auth/cookies.ts';
 import { DeviceService } from './auth/devices.ts';
 import { ServerIdentity } from './auth/identity.ts';
 import { PairingService } from './auth/pairing.ts';
-import { loadConfig, type UniConfig } from './config.ts';
+import { loadConfig, type ConfigIssue, type UniConfig } from './config.ts';
 import { Store } from './db.ts';
 import { createApp } from './http/app.ts';
 import { isLocalConnection, peerAddress } from './http/local.ts';
@@ -20,6 +23,8 @@ const log = createLogger('main');
 
 const HEARTBEAT_MS = 30_000;
 const SWEEP_MS = 60_000;
+/** Port occupancy fallback range: 8787 → 8788 … (实施文档 01 §2.4). */
+const PORT_FALLBACK_TRIES = 10;
 
 interface ClientState {
   ws: WebSocket;
@@ -30,13 +35,53 @@ interface ClientState {
   subscriptions: Map<string, () => void>;
 }
 
+/** Mutable runtime facts the API surface reports (actual port, config state). */
+export interface RuntimeInfo {
+  port: number;
+  issues: ConfigIssue[];
+  configPath?: string;
+}
+
 // --------------------------------------------------------------------- main
 
 async function main(): Promise<void> {
-  const config = loadConfig();
+  const loaded = loadConfig();
+  const config = loaded.config;
 
-  const store = new Store(resolve(config.server.dataDir, 'uni-terminal.db'));
-  const identity = ServerIdentity.loadOrCreate(config.server.dataDir);
+  // The registry PATH read is async and one-shot; do it before the survey /
+  // banner so discovery sees the same directories the user's shell does.
+  await augmentSearchDirs();
+
+  let port = config.server.port;
+  let portFallback = false;
+  if (!(await isPortFree(config.server.host, config.server.port))) {
+    const preferred = config.server.port;
+    const alt = await findAvailablePort(config.server.host, preferred, PORT_FALLBACK_TRIES);
+    if (alt === undefined) {
+      throw new Error(`端口 ${preferred} 及其后 ${PORT_FALLBACK_TRIES - 1} 个端口均被占用`);
+    }
+    port = alt;
+    config.server.port = alt;
+    portFallback = true;
+    loaded.issues.push({
+      code: 'port_in_use',
+      message: `预设端口 ${preferred} 被占用，已顺延使用 ${alt}。`,
+    });
+  }
+
+  const runtime: RuntimeInfo = { port, issues: loaded.issues, configPath: loaded.path };
+
+  let store: Store;
+  let identity: ServerIdentity;
+  try {
+    store = new Store(resolve(config.server.dataDir, 'uni-terminal.db'));
+    identity = ServerIdentity.loadOrCreate(config.server.dataDir);
+  } catch (err) {
+    // Hard constraint: a broken data directory must still leave the user a
+    // reachable page that explains how to recover — never a silent exit.
+    runRecoveryMode(runtime, err as Error);
+    return;
+  }
   const pairing = new PairingService(store, config);
   const devices = new DeviceService(store, config);
   const hub = new SessionHub(store, config);
@@ -61,12 +106,13 @@ async function main(): Promise<void> {
     transport,
     webDistDir,
     startedAt,
+    runtime,
     onDeviceRevoked: (deviceId) => wsHandle?.kickDevice(deviceId) ?? 0,
   });
 
   const httpServer = serve(
-    { fetch: app.fetch, hostname: config.server.host, port: config.server.port },
-    (info) => printBanner(config, info.port, transport, identity),
+    { fetch: app.fetch, hostname: config.server.host, port },
+    (info) => printBanner(config, info.port, transport, identity, runtime, portFallback),
   ) as unknown as HttpServer;
 
   wsHandle = attachWebSocket(httpServer, { config, hub, devices });
@@ -100,6 +146,63 @@ async function main(): Promise<void> {
   });
 }
 
+// ----------------------------------------------------------------- port pick
+
+function isPortFree(host: string, port: number): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const probe = net.createServer();
+    probe.once('error', () => resolvePromise(false));
+    probe.once('listening', () => probe.close(() => resolvePromise(true)));
+    // Probe on exactly the address the server will bind: on Windows, an
+    // unspecified host binds the IPv6 dual-stack socket, which can succeed
+    // even while 0.0.0.0:port is taken — the real bind would then crash.
+    probe.listen(port, host);
+  });
+}
+
+async function findAvailablePort(host: string, preferred: number, tries: number): Promise<number | undefined> {
+  for (let candidate = preferred; candidate < preferred + tries; candidate += 1) {
+    if (await isPortFree(host, candidate)) return candidate;
+  }
+  return undefined;
+}
+
+// ----------------------------------------------------------- recovery mode
+
+/**
+ * Minimal HTTP surface for "the data directory is unusable". It deliberately
+ * serves nothing but diagnostics: no sessions, no pairing, no credentials.
+ */
+function runRecoveryMode(runtime: RuntimeInfo, reason: Error): void {
+  const app = new Hono();
+  app.get('/api/local/recover', (c) =>
+    c.json({ degraded: true, reason: reason.message, issues: runtime.issues, configPath: runtime.configPath }),
+  );
+  app.get('*', (c) =>
+    c.html(
+      [
+        '<!doctype html><meta charset="utf-8"><title>Uni-terminal 降级运行</title>',
+        '<body style="font-family:system-ui;max-width:44rem;margin:3rem auto;padding:0 1rem;line-height:1.7">',
+        '<h1>Uni-terminal 处于只读诊断模式</h1>',
+        `<p>数据目录不可写，无法启动完整服务。原因：<code>${reason.message}</code></p>`,
+        '<p>请检查数据目录的权限或磁盘空间后重启服务。</p>',
+        `<p>诊断接口：<code>/api/local/recover</code></p>`,
+        '</body>',
+      ].join(''),
+    ),
+  );
+
+  const port = runtime.port;
+  serve({ fetch: app.fetch, hostname: '127.0.0.1', port }, () => {
+    log.warn('started in recovery mode', { port, reason: reason.message });
+    console.log(`\n  ⚠ Uni-terminal 降级运行（只读诊断模式）: http://127.0.0.1:${port}/local/recover`);
+    console.log(`  原因：${reason.message}\n`);
+  });
+  // Recovery mode still wants to die politely on Ctrl+C.
+  process.on('SIGINT', () => process.exit(0));
+  process.on('SIGTERM', () => process.exit(0));
+}
+
 // ------------------------------------------------------------------ startup
 
 function printBanner(
@@ -107,6 +210,8 @@ function printBanner(
   port: number,
   transport: ReturnType<typeof createTransportRegistry>,
   identity: ServerIdentity,
+  runtime: RuntimeInfo,
+  portFallback: boolean,
 ): void {
   const endpoints = transport.active.status().endpoints;
   const lines: string[] = [];
@@ -124,13 +229,21 @@ function printBanner(
   }
   lines.push(`  服务指纹       ${identity.fingerprint}`);
   lines.push(`  可用 Agent     ${Object.keys(config.agents).join(', ') || '（未配置）'}`);
+  if (runtime.configPath) lines.push(`  配置文件       ${runtime.configPath}`);
+
+  for (const issue of runtime.issues) {
+    if (issue.code === 'survey_note' || issue.code === 'fresh') continue;
+    lines.push(`  ⚠ ${issue.message}`);
+  }
+  if (portFallback) {
+    lines.push('  ⚠ 预设端口被占用，已自动顺延；管理台与横幅展示的均为实际端口');
+  }
 
   const pty = ptyDiagnostics();
   if (pty.available === false) {
     lines.push('');
-    lines.push('  ⚠ 未加载 node-pty，将以管道模式运行（无法交互式输入）');
+    lines.push('  ⚠ 未加载 @lydell/node-pty，将以管道模式运行（无法交互式输入）');
     if (pty.error) lines.push(`    原因：${pty.error}`);
-    lines.push('    修复：安装 Visual Studio Build Tools（C++ 工作负载）后重跑 npm install');
   }
   if (!config.security.forceSecureCookie) {
     lines.push('');

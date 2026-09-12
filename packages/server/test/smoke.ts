@@ -21,7 +21,8 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
@@ -190,6 +191,8 @@ async function main(): Promise<void> {
     await testRateLimitsAndReplay();
     await testRevocation(deviceCookie);
     await testErrorHygiene();
+    await testConfigSurface();
+    await testDegradedStartupAndPortFallback();
   } finally {
     fixture.child.kill();
     await sleep(300);
@@ -667,6 +670,173 @@ async function testErrorHygiene(): Promise<void> {
     body: JSON.stringify({ agent: 'x'.repeat(500) }),
   });
   check('超长字段被拒绝', oversized.status === 400 || oversized.status === 401, `got ${oversized.status}`);
+}
+
+async function testConfigSurface(): Promise<void> {
+  section('配置面接口（M0 §2.3）');
+
+  const configRes = await fetch(`${BASE}/api/local/config`);
+  const configBody = (await configRes.json()) as {
+    path?: string;
+    config?: { server?: { name?: string } };
+    issues?: unknown[];
+  };
+  check('读取配置返回文件路径', configRes.ok && typeof configBody.path === 'string');
+  check('读取配置返回生效值', configBody.config?.server?.name === 'smoke-test');
+  check('读取配置附带降级问题列表', Array.isArray(configBody.issues));
+
+  const rename = await fetch(`${BASE}/api/local/config`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ server: { name: 'smoke-renamed' } }),
+  });
+  const renameBody = (await rename.json()) as { ok?: boolean; requiresRestart?: boolean };
+  check('改名热生效不需重启', rename.ok && renameBody.ok === true && renameBody.requiresRestart === false);
+  const health = await fetch(`${BASE}/api/health`);
+  check('改名后健康检查立即可见新名字', ((await health.json()) as { name?: string }).name === 'smoke-renamed');
+
+  const portPatch = await fetch(`${BASE}/api/local/config`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ server: { port: 9999 } }),
+  });
+  const portBody = (await portPatch.json()) as { requiresRestart?: boolean; restartKeys?: string[] };
+  check('改端口被标记为需重启', portBody.requiresRestart === true && portBody.restartKeys?.includes('server.port') === true);
+  check('改端口后实际端口不变（运行中服务不漂移）', ((await (await fetch(`${BASE}/api/local/service`)).json()) as { port?: number }).port === PORT);
+
+  const badPatch = await fetch(`${BASE}/api/local/config`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ agents: 'nope' }),
+  });
+  check('畸形配置补丁被拒绝', badPatch.status === 400, `got ${badPatch.status}`);
+
+  const testEcho = await fetch(`${BASE}/api/local/agents/echo/test`, { method: 'POST' });
+  const testEchoBody = (await testEcho.json()) as { ok?: boolean; exitCode?: number; output?: string };
+  check(
+    'agent test 真跑一次 --version',
+    testEcho.ok && testEchoBody.ok === true && testEchoBody.exitCode === 0,
+    `status=${testEcho.status} body=${JSON.stringify(testEchoBody).slice(0, 200)}`,
+  );
+
+  const testUnknown = await fetch(`${BASE}/api/local/agents/definitely-not-real/test`, { method: 'POST' });
+  check('未知 agent test 返回 404', testUnknown.status === 404, `got ${testUnknown.status}`);
+
+  const rescan = await fetch(`${BASE}/api/local/agents/rescan`, { method: 'POST' });
+  const rescanBody = (await rescan.json()) as { agents?: unknown[]; workspaceCandidates?: unknown[] };
+  check('环境普查返回探测列表', rescan.ok && Array.isArray(rescanBody.agents));
+  check('环境普查返回工作区候选', Array.isArray(rescanBody.workspaceCandidates));
+
+  const fsList = await fetch(`${BASE}/api/local/fs/list`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: join(configBody.path ?? '', '..') }),
+  });
+  const fsBody = (await fsList.json()) as { entries?: Array<{ name: string; type: string }> };
+  check('目录列举返回条目', fsList.ok && (fsBody.entries?.length ?? 0) > 0);
+  check('目录列举能看到配置文件', fsBody.entries?.some((e) => e.name === 'config.json') === true);
+
+  const fsBad = await fetch(`${BASE}/api/local/fs/list`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'Z:\\definitely\\not\\here' }),
+  });
+  check('不存在的目录返回 400', fsBad.status === 400, `got ${fsBad.status}`);
+
+  const service = await fetch(`${BASE}/api/local/service`);
+  const serviceBody = (await service.json()) as { port?: number; pid?: number; autostart?: unknown };
+  check('service 返回实际端口与进程号', service.ok && serviceBody.port === PORT && typeof serviceBody.pid === 'number');
+  check('service 返回自启状态字段', 'autostart' in serviceBody);
+}
+
+/**
+ * Degraded startup (E6) and port fallback (§2.4), exercised with a second
+ * server whose config file is deliberately invalid JSON. The broken file means
+ * defaults apply — including the default port, which we occupy first so the
+ * fallback to the next port is also proven. UNI_TERMINAL_DATA_DIR keeps the
+ * whole run inside a throwaway temp directory.
+ */
+async function testDegradedStartupAndPortFallback(): Promise<void> {
+  section('降级启动与端口顺延（M0 §2.4）');
+
+  const dir = mkdtempSync(join(tmpdir(), 'uni-terminal-degraded-'));
+  const brokenConfigPath = join(dir, 'config.json');
+  writeFileSync(brokenConfigPath, '{ this is not valid json !!', 'utf8');
+
+  // Occupy the default port so the degraded server must fall through to 8788.
+  const squatter = net.createServer();
+  const squatReady = new Promise<void>((resolvePromise) => {
+    squatter.once('listening', () => resolvePromise());
+    squatter.listen(8787, '0.0.0.0');
+  });
+  await squatReady;
+
+  const entry = join(import.meta.dirname, '..', 'src', 'index.ts');
+  const child = spawn(
+    process.execPath,
+    ['--experimental-sqlite', '--disable-warning=ExperimentalWarning', entry],
+    {
+      cwd: join(import.meta.dirname, '..', '..', '..'),
+      env: {
+        ...process.env,
+        UNI_TERMINAL_CONFIG: brokenConfigPath,
+        UNI_TERMINAL_DATA_DIR: dir,
+        UNI_LOG_LEVEL: 'warn',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    },
+  );
+  child.stdout?.on('data', (chunk: Buffer) => {
+    if (process.env.SMOKE_VERBOSE) process.stdout.write(`[degraded] ${chunk.toString()}`);
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    if (process.env.SMOKE_VERBOSE) process.stderr.write(`[degraded] ${chunk.toString()}`);
+  });
+
+  try {
+    const degradedBase = 'http://127.0.0.1:8788';
+    let up = false;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`${degradedBase}/api/health`);
+        if (res.ok) {
+          up = true;
+          break;
+        }
+      } catch {
+        // Not up yet.
+      }
+      await sleep(200);
+    }
+    check('配置损坏仍能启动（降级而非退出）', up);
+    if (!up) return;
+
+    const configRes = await fetch(`${degradedBase}/api/local/config`);
+    const configBody = (await configRes.json()) as {
+      issues?: Array<{ code?: string; backupPath?: string }>;
+    };
+    check('降级原因以 parse_error 暴露给界面', configBody.issues?.some((i) => i.code === 'parse_error') === true);
+    check('损坏配置已自动备份', configBody.issues?.every((i) => i.backupPath === undefined || existsSync(i.backupPath!)) === true && readdirSync(dir).some((n) => n.includes('.bak-')));
+
+    const service = (await (await fetch(`${degradedBase}/api/local/service`)).json()) as { port?: number };
+    check('端口被占用时顺延到 8788', service.port === 8788, `got ${service.port}`);
+
+    // The only backup in this scenario is the copy of the *broken* file taken
+    // at startup — restoring it must be refused with a clear reason, not 500.
+    const restore = await fetch(`${degradedBase}/api/local/config/restore-backup`, { method: 'POST' });
+    check('备份同样损坏时拒绝恢复并给出明确错误', restore.status === 422, `got ${restore.status}`);
+  } finally {
+    squatter.close();
+    child.kill();
+    await sleep(300);
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Best effort.
+    }
+  }
 }
 
 void main().catch((err: unknown) => {

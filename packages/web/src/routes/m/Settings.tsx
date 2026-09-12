@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import { api, ApiError } from '../../api/client.ts';
 import { onInstallAvailability, promptInstall } from '../../pwa.ts';
 import { detectUa } from '../../lib/ua.ts';
+import { SecureContextGuide } from '../../components/SecureContextGuide.tsx';
 
 /** 手机端设置：安装到主屏 / 连接信息 / 本设备 / 退出登录。 */
 export function MSettings(): React.ReactNode {
@@ -55,6 +56,13 @@ export function MSettings(): React.ReactNode {
           </p>
         )}
       </div>
+
+      {!standalone && !window.isSecureContext && (
+        <>
+          <h2>解锁更多功能（在家使用时）</h2>
+          <SecureContextGuide />
+        </>
+      )}
 
       <h2>连接</h2>
       <div className="card">

@@ -3,7 +3,7 @@ import { Link, useLocation, useParams } from 'react-router';
 
 import { useLive, type LiveEvent } from '../../store/live.ts';
 import { stripAnsi } from '../../lib/ansi.ts';
-import { analyzeTail } from '../../lib/pty.ts';
+import { analyzeTail, humanizeTranscript } from '../../lib/pty.ts';
 import { TerminalPane } from '../../components/TerminalPane.tsx';
 import { QuickReplies } from '../../components/QuickReplies.tsx';
 
@@ -112,7 +112,7 @@ export function MSession(): React.ReactNode {
           className="card mono"
           style={{ maxHeight: '56vh', overflowY: 'auto', fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
         >
-          {outputText ? stripAnsi(outputText).slice(-80000) : <span className="muted">等待 Agent 输出…</span>}
+          {outputText ? humanizeTranscript(stripAnsi(outputText)) : <span className="muted">等待 Agent 输出…</span>}
         </div>
       )}
 

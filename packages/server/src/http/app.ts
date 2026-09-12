@@ -437,7 +437,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       },
       /** Pairing page drives its countdown ring off this. */
       rotateMs: config.security.pairingRotateMs,
-      transport: { active: t, all: transport.all },
+      transport: { active: t, all: transport.all() },
       agents: agentAvailability(),
       catalog: AGENT_CATALOG.map((a) => ({ id: a.id, label: a.label, upstream: a.upstream })),
       devices: devices.list().map(devicePayload),
@@ -575,7 +575,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.get('/api/local/agents', (c) => c.json({ agents: agentAvailability(), pty: ptyDiagnostics() }));
 
-  app.get('/api/local/transport', (c) => c.json({ active: transport.active.status(), all: transport.all }));
+  app.get('/api/local/transport', (c) => c.json({ active: transport.active.status(), all: transport.all() }));
 
   app.get('/api/local/transport', (c) => c.json({ active: transport.active.status(), all: transport.all }));
 

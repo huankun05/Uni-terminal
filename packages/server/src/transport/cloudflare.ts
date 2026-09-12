@@ -55,16 +55,20 @@ export class CloudflareTransport implements TransportAdapter {
   }
 
   status(): TransportStatus {
-    const endpoints = this.endpoints();
+    // ready 只看隧道本身——局域网地址是备用门牌，不代表隧道可用，
+    // 否则「隧道运行中」会在根本没连上时也亮绿灯。
+    const endpoints = this.running ? this.endpoints() : [];
     const hint =
       this.state === 'error'
         ? `隧道启动失败：${this.detail}`
         : this.state === 'starting'
           ? '正在建立隧道…'
-          : !this.binaryPath
-            ? '未找到 cloudflared。可在设置页自动下载，或手动指定路径。'
-            : undefined;
-    return { mode: this.mode, ready: endpoints.length > 0, hint, endpoints };
+          : running
+            ? undefined
+            : !this.binaryPath
+              ? '未找到 cloudflared。可在设置页自动下载，或手动指定路径。'
+              : undefined;
+    return { mode: this.mode, ready: running, hint, endpoints };
   }
 
   endpoints(): AdvertisedEndpoint[] {

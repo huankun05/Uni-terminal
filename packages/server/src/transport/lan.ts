@@ -170,5 +170,10 @@ export function createTransportRegistry(config: UniConfig): TransportRegistry {
     lanCandidates: lan.endpoints().length,
   });
 
-  return { active, all, cloudflare, tailscale };
+  return {
+    active,
+    all: () => [lan, ...others].map((t) => t.status()),
+    cloudflare,
+    tailscale,
+  };
 }

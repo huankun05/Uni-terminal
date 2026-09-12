@@ -50,6 +50,9 @@ export function LocalSettings(): React.ReactNode {
   const [testing, setTesting] = useState<string>('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [newWorkspacePath, setNewWorkspacePath] = useState('');
+  /** 「改路径」作用中的工作区 id；null 时 DirPicker 服务于「新增」。 */
+  const [wsPathTarget, setWsPathTarget] = useState<string | null>(null);
+  const [wsRename, setWsRename] = useState<{ id: string; value: string } | null>(null);
   const [tunnel, setTunnel] = useState<TransportInfo | null>(null);
   const [tsStatus, setTsStatus] = useState<TransportInfo | null>(null);
   const [tsDetail, setTsDetail] = useState('');
@@ -168,6 +171,13 @@ export function LocalSettings(): React.ReactNode {
     await patch({ workspaces: (config?.config.workspaces ?? []).filter((w) => w.id !== id) }, '已移除工作区');
   };
 
+  /** 改路径 / 改名：与新增走同一条 PATCH 路径，默认工作区同样可编辑。 */
+  const updateWorkspace = async (id: string, changes: Partial<{ name: string; path: string }>): Promise<void> => {
+    const list = (config?.config.workspaces ?? []).map((w) => (w.id === id ? { ...w, ...changes } : w));
+    const target = list.find((w) => w.id === id);
+    await patch({ workspaces: list }, `已更新「${target?.name ?? id}」`);
+  };
+
   const toggleAutostart = async (): Promise<void> => {
     const enable = !(service?.autostart?.registered ?? false);
     const res = await api.post<{ ok: boolean; message?: string; autostart: ServiceInfo['autostart'] }>(
@@ -241,10 +251,31 @@ export function LocalSettings(): React.ReactNode {
       <div className="card">
         {(config?.config.workspaces ?? []).map((w) => (
           <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0' }}>
-            <span style={{ flex: 1, fontSize: 13 }} className="mono">
-              <strong>{w.name}</strong> → {w.path}
-            </span>
-            <button className="btn danger" onClick={() => void removeWorkspace(w.id)}>移除</button>
+            {wsRename?.id === w.id ? (
+              <>
+                <input
+                  autoFocus
+                  value={wsRename.value}
+                  onChange={(e) => setWsRename({ id: w.id, value: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && wsRename.value.trim()) void updateWorkspace(w.id, { name: wsRename.value.trim() }).then(() => setWsRename(null));
+                    if (e.key === 'Escape') setWsRename(null);
+                  }}
+                  style={{ flex: 1, background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', padding: '4px 8px', fontSize: 13 }}
+                />
+                <button className="btn sm primary" onClick={() => { if (wsRename.value.trim()) void updateWorkspace(w.id, { name: wsRename.value.trim() }).then(() => setWsRename(null)); }}>保存</button>
+                <button className="btn sm" onClick={() => setWsRename(null)}>取消</button>
+              </>
+            ) : (
+              <>
+                <span style={{ flex: 1, fontSize: 13 }} className="mono">
+                  <strong>{w.name}</strong> → {w.path}
+                </span>
+                <button className="btn sm" onClick={() => setWsRename({ id: w.id, value: w.name })}>改名</button>
+                <button className="btn sm" onClick={() => { setWsPathTarget(w.id); setPickerOpen(true); }}>改路径</button>
+                <button className="btn sm danger" onClick={() => void removeWorkspace(w.id)}>移除</button>
+              </>
+            )}
           </div>
         ))}
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -390,7 +421,9 @@ export function LocalSettings(): React.ReactNode {
           title="选择工作区目录"
           initialPath={newWorkspacePath || undefined}
           onPick={(path) => {
-            setNewWorkspacePath(path);
+            if (wsPathTarget) void updateWorkspace(wsPathTarget, { path });
+            else setNewWorkspacePath(path);
+            setWsPathTarget(null);
             setPickerOpen(false);
           }}
           onClose={() => setPickerOpen(false)}

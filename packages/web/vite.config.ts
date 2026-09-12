@@ -12,7 +12,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'prompt',
+      // 自动更新：新版本在下次刷新即生效。'prompt' 模式需要界面配合，
+      // 没做提示界面会让用户永远停留在旧版本——这里宁可简单可靠。
+      registerType: 'autoUpdate',
       includeAssets: ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png'],
       manifest: {
         name: 'Uni-terminal',
